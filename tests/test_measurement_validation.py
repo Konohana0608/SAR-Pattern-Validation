@@ -7,14 +7,13 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-import matplotlib
 import numpy as np
 import pytest
 
-matplotlib.use("Agg")
-
 from sar_pattern_validation.workflow_config import WorkflowConfig
 from sar_pattern_validation.workflows import _complete_workflow
+
+from .helpers import compare_gamma_maps
 
 ARTIFACT_DIR = Path(__file__).parent / "artifacts" / "measurement_validation"
 LOG_DIR = ARTIFACT_DIR / "logs"
@@ -229,9 +228,7 @@ def test_measurement_workflow_cases_match_reference_artifacts(
     with _debug_file_logging(log_path):
         result = _compute_case(case, save_plots=save_plots)
 
-    threshold = float(os.getenv(GAMMA_DIFF_THRESHOLD_ENV, "1e-6"))
     actual = result.actual
-
     assert actual["failed_pixel_count"] == 0, (
         f"{case.case_id} expected zero failed pixels, got "
         f"{actual['failed_pixel_count']} out of {actual['evaluated_pixel_count']}"
@@ -274,20 +271,7 @@ def test_measurement_workflow_cases_match_reference_artifacts(
         assert expected_mask is not None, (
             f"{case.case_id} artifact missing expected mask"
         )
-        actual_gamma = result.gamma_map
-        actual_mask = result.evaluation_mask
 
-        assert actual_gamma.shape == expected_gamma.shape
-        assert actual_mask.shape == expected_mask.shape
-        assert np.array_equal(actual_mask, expected_mask)
-
-        finite = np.isfinite(expected_gamma) & np.isfinite(actual_gamma)
-        assert np.array_equal(np.isfinite(expected_gamma), np.isfinite(actual_gamma))
-        abs_diff = np.abs(expected_gamma[finite] - actual_gamma[finite])
-        over_threshold = int(np.sum(abs_diff > threshold))
-        max_abs_diff = float(np.max(abs_diff)) if abs_diff.size else 0.0
-
-        assert over_threshold == 0, (
-            f"{case.case_id} gamma field mismatch: {over_threshold} pixels exceed "
-            f"threshold {threshold}. max_abs_diff={max_abs_diff}"
+        compare_gamma_maps(
+            expected_gamma, expected_mask, result.gamma_map, result.evaluation_mask
         )
