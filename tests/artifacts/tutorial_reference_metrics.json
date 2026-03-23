@@ -1,0 +1,39 @@
+{
+  "artifact_version": 1,
+  "dataset": {
+    "measured_csv": "data/example/measured_sSAR1g.csv",
+    "reference_csv": "data/example/reference_sSAR1g.csv"
+  },
+  "expected": {
+    "evaluated_pixel_count": 13884,
+    "failed_pixel_count": 0,
+    "pass_rate_percent": 100.0,
+    "passed_pixel_count": 13884
+  },
+  "inputs": {
+    "distance_to_agreement_mm": 2.0,
+    "dose_to_agreement_percent": 5.0,
+    "evaluation_roi_policy": "intersection",
+    "gamma_cap": 2.0,
+    "noise_floor_wkg": 0.5,
+    "registration_stages": [
+      {
+        "rot_span_deg": 180.0,
+        "rot_step_deg": 4.0,
+        "translation_step": 0.01,
+        "tx_steps": 6,
+        "ty_steps": 6
+      },
+      {
+        "rot_span_deg": 90.0,
+        "rot_step_deg": 1.0,
+        "translation_step": 0.001,
+        "tx_steps": 6,
+        "ty_steps": 6
+      }
+    ],
+    "resample_resolution": null,
+    "transform_type": "rigid"
+  },
+  "source": "tutorial_gamma_pattern_validation_notebook.ipynb"
+}
