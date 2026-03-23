@@ -1,3 +1,5 @@
+import os
+
 import numpy as np
 import pandas as pd
 
@@ -140,3 +142,36 @@ def rigid_transform_points(df, tx=0.0, ty=0.0, theta_deg=0.0):
     out[xcol] = c * x - s * y + tx
     out[ycol] = s * x + c * y + ty
     return out
+
+
+def compare_gamma_maps(
+    expected_gamma: np.ndarray,
+    expected_mask: np.ndarray,
+    actual_gamma: np.ndarray,
+    actual_mask: np.ndarray,
+    threshold: float | None = None,
+):
+    """
+    Compare two gamma maps for near-equality.
+
+    Args:
+        expected_gamma, expected_mask: 2D arrays of expected gamma values and evaluation mask.
+        actual_gamma, actual_mask: 2D arrays of actual gamma values and evaluation mask.
+        threshold: optional absolute tolerance for gamma value differences (otherwise read environment variable).
+    """
+
+    assert actual_gamma.shape == expected_gamma.shape
+    assert actual_mask.shape == expected_mask.shape
+    assert np.array_equal(actual_mask, expected_mask)
+
+    finite = np.isfinite(expected_gamma) & np.isfinite(actual_gamma)
+    assert np.array_equal(np.isfinite(expected_gamma), np.isfinite(actual_gamma))
+
+    if threshold is None:
+        threshold = float(os.getenv("MEASUREMENT_GAMMA_DIFF_THRESHOLD", "2e-6"))
+
+    assert np.allclose(
+        expected_gamma[finite],
+        actual_gamma[finite],
+        atol=threshold,
+    )

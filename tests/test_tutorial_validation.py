@@ -2,17 +2,16 @@ import json
 import os
 from pathlib import Path
 
-import matplotlib
 import numpy as np
 import pytest
-
-matplotlib.use("Agg")
 
 from sar_pattern_validation.gamma_eval import GammaMapEvaluator
 from sar_pattern_validation.image_loader import SARImageLoader
 from sar_pattern_validation.plotting import show_registration_overlay
 from sar_pattern_validation.registration2d import Rigid2DRegistration, Transform2D
 from sar_pattern_validation.workflows import _apply_roi_policy
+
+from .helpers import compare_gamma_maps
 
 ARTIFACT_PATH = Path(__file__).parent / "artifacts" / "tutorial_reference_metrics.json"
 GAMMA_FIELD_PATH = Path(__file__).parent / "artifacts" / "tutorial_gamma_field.npz"
@@ -147,19 +146,4 @@ def test_tutorial_dataset_metrics_match_reference_artifact() -> None:
     actual_gamma = evaluator.gamma_map
     actual_mask = evaluator.evaluation_mask.astype(np.uint8)
 
-    assert actual_gamma.shape == expected_gamma.shape
-    assert actual_mask.shape == expected_mask.shape
-    assert np.array_equal(actual_mask, expected_mask)
-
-    finite = np.isfinite(expected_gamma) & np.isfinite(actual_gamma)
-    assert np.array_equal(np.isfinite(expected_gamma), np.isfinite(actual_gamma))
-    abs_diff = np.abs(expected_gamma[finite] - actual_gamma[finite])
-
-    threshold = float(os.getenv("GAMMA_DIFF_THRESHOLD", "0.0"))
-    over_threshold = int(np.sum(abs_diff > threshold))
-    max_abs_diff = float(np.max(abs_diff)) if abs_diff.size else 0.0
-
-    assert over_threshold == 0, (
-        f"Gamma field mismatch: {over_threshold} pixels exceed threshold "
-        f"{threshold}. max_abs_diff={max_abs_diff}"
-    )
+    compare_gamma_maps(expected_gamma, expected_mask, actual_gamma, actual_mask)
