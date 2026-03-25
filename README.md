@@ -147,10 +147,16 @@ This section documents how to set up and maintain the SAR Pattern Validation too
 1. **Add the service to your oSPARC project**
    Add a `simcore/services/dynamic/jupyter-math` service of version **3.0.5** to your project and open it.
 
-2. **Run the setup**
-   Download the `Makefile` from ``SAR-Pattern-Validation \ osparc_makefile`` and upload it to the workspace of the JupyterLab service.
+2. **Add the core files**
+  From the `SAR Pattern Validation` repository, download the `Makefile` and the `voila` notebook (in `osparc_makefile` and `notebooks` directories, respectively) and upload them to the workspace of the JupyterLab service.
 
-   Open a terminal inside the service and run `make setup`
+3. **Run the voila notebook**
+  The voila notebook will automatically handle the full setup (installation & update of the `SAR Pattern Validation` package, as well as LFS-downloading the reference files).
+
+  If the package is not available through the network, you need to download it in full and upload it to the workspace folder, or log into your GitHub account through the terminal / plugin in JupyterLab.
+
+4. **Set the JupyterLab service to run in Voila mode**
+  Once you are sure the voila is working as expected, please stop the service and change its boot mode to Voila. That will enable user to directly access the GUI without the need for any setup on their side.
 
 ---
 
