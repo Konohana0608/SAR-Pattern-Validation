@@ -137,6 +137,64 @@ $$
 
 Distance-to-agreement (mm) is internally converted to pixel radius using reference spacing.
 
+
+## oSPARC Service Setup & Maintenance
+
+This section documents how to set up and maintain the SAR Pattern Validation tool as an oSPARC dynamic service.
+
+### First-time setup
+
+1. **Add the service to your oSPARC project**
+   Add a `simcore/services/dynamic/jupyter-math` service of version **3.0.5** to your project and open it.
+
+2. **Clone the repository**
+   In the service terminal, navigate to the workspace directory and clone the repository:
+   ```bash
+   cd /home/jovyan/work/workspace
+   git clone https://github.com/ITISFoundation/SAR-Pattern-Validation.git
+   ```
+
+3. **Copy the Makefile to the workspace**
+   ```bash
+   cp SAR-Pattern-Validation/osparc_makefile/Makefile .
+   ```
+
+4. **Continue with the maintenance steps below.**
+
+---
+
+### Maintenance
+
+From the workspace directory in the terminal, run:
+
+```bash
+make setup
+```
+
+This single command will:
+- Pull the latest code from the repository (`git pull`)
+- Install `git-lfs` if it is not already available (via `wget`, no root required)
+- Run `git lfs pull` to download all large data files
+- Copy `voila.ipynb` from the repository into the workspace root, where Voila requires it to be
+
+---
+
+### Testing and cleaning up
+
+To test the tool, open `voila.ipynb` in the workspace, run all cells and go through the workflow.
+
+> **Important:** The tool creates folders (`images/`, `system_state/`, `uploaded_data/`) in the workspace during a run. These must be deleted before saving the template — otherwise they will be visible to every user who instantiates a new instance from it.
+
+After testing, clean up with:
+
+```bash
+make clean
+```
+
+This removes `images/`, `system_state/`, and `uploaded_data/` from the workspace.
+
+---
+
 ## Contributors
 - Matthew Morvan
 - Javier Ordonez -- Maintainer
