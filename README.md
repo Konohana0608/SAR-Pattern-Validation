@@ -147,19 +147,12 @@ This section documents how to set up and maintain the SAR Pattern Validation too
 1. **Add the service to your oSPARC project**
    Add a `simcore/services/dynamic/jupyter-math` service of version **3.0.5** to your project and open it.
 
-2. **Clone the repository**
-   In the service terminal, navigate to the workspace directory and clone the repository:
+2. **Run the setup**
+   A `Makefile` is pre-deployed at the top level of the oSPARC service workspace (`/home/jovyan/work/workspace/Makefile`). Open a terminal inside the service and run:
    ```bash
    cd /home/jovyan/work/workspace
-   git clone https://github.com/ITISFoundation/SAR-Pattern-Validation.git
+   make setup
    ```
-
-3. **Copy the Makefile to the workspace**
-   ```bash
-   cp SAR-Pattern-Validation/osparc_makefile/Makefile .
-   ```
-
-4. **Continue with the maintenance steps below.**
 
 ---
 
@@ -172,9 +165,9 @@ make setup
 ```
 
 This single command will:
-- Pull the latest code from the repository (`git pull`)
+- Clone the `SAR-Pattern-Validation` repository if it is not yet present, or pull the latest code if it is (warns and continues if the network is unavailable)
 - Install `git-lfs` if it is not already available (via `wget`, no root required)
-- Run `git lfs pull` to download all large data files
+- Run `git lfs pull` to download all large data files (warns and continues on failure)
 - Copy `voila.ipynb` from the repository into the workspace root, where Voila requires it to be
 
 ---
