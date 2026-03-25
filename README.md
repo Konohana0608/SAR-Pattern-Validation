@@ -148,11 +148,9 @@ This section documents how to set up and maintain the SAR Pattern Validation too
    Add a `simcore/services/dynamic/jupyter-math` service of version **3.0.5** to your project and open it.
 
 2. **Run the setup**
-   A `Makefile` is pre-deployed at the top level of the oSPARC service workspace (`/home/jovyan/work/workspace/Makefile`). Open a terminal inside the service and run:
-   ```bash
-   cd /home/jovyan/work/workspace
-   make setup
-   ```
+   Download the `Makefile` from ``SAR-Pattern-Validation \ osparc_makefile`` and upload it to the workspace of the JupyterLab service.
+
+   Open a terminal inside the service and run `make setup`
 
 ---
 
