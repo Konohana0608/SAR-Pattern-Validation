@@ -82,10 +82,12 @@ setup-pre-commit:
 	@echo "Pre-commit hooks installed successfully!"
 	@echo "Use make run-pre-commit to check staged files, or run-pre-commit-all to check all files"
 
+# Run pre-commit hooks on staged files
 run-pre-commit: setup-pre-commit
 	@echo "Running pre-commit hooks on staged files..."
 	uv run pre-commit run
 
+# Run pre-commit hooks on all files (useful for CI or manual checks)
 run-pre-commit-all: setup-pre-commit
 	@echo "Running pre-commit hooks on all files..."
 	uv run pre-commit run --all-files
