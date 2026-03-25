@@ -147,19 +147,16 @@ This section documents how to set up and maintain the SAR Pattern Validation too
 1. **Add the service to your oSPARC project**
    Add a `simcore/services/dynamic/jupyter-math` service of version **3.0.5** to your project and open it.
 
-2. **Clone the repository**
-   In the service terminal, navigate to the workspace directory and clone the repository:
-   ```bash
-   cd /home/jovyan/work/workspace
-   git clone https://github.com/ITISFoundation/SAR-Pattern-Validation.git
-   ```
+2. **Add the core files**
+  From the `SAR Pattern Validation` repository, download the `Makefile` and the `voila` notebook (in `osparc_makefile` and `notebooks` directories, respectively) and upload them to the workspace of the JupyterLab service.
 
-3. **Copy the Makefile to the workspace**
-   ```bash
-   cp SAR-Pattern-Validation/osparc_makefile/Makefile .
-   ```
+3. **Run the voila notebook**
+  The voila notebook will automatically handle the full setup (installation & update of the `SAR Pattern Validation` package, as well as LFS-downloading the reference files).
 
-4. **Continue with the maintenance steps below.**
+  If the package is not available through the network, you need to download it in full and upload it to the workspace folder, or log into your GitHub account through the terminal / plugin in JupyterLab.
+
+4. **Set the JupyterLab service to run in Voila mode**
+  Once you are sure the voila is working as expected, please stop the service and change its boot mode to Voila. That will enable user to directly access the GUI without the need for any setup on their side.
 
 ---
 
@@ -172,9 +169,9 @@ make setup
 ```
 
 This single command will:
-- Pull the latest code from the repository (`git pull`)
+- Clone the `SAR-Pattern-Validation` repository if it is not yet present, or pull the latest code if it is (warns and continues if the network is unavailable)
 - Install `git-lfs` if it is not already available (via `wget`, no root required)
-- Run `git lfs pull` to download all large data files
+- Run `git lfs pull` to download all large data files (warns and continues on failure)
 - Copy `voila.ipynb` from the repository into the workspace root, where Voila requires it to be
 
 ---
