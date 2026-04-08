@@ -51,6 +51,8 @@ class Rigid2DRegistration:
         mask_moving = (
             self._sanitize_spacing(moving_mask) if moving_mask is not None else None
         )
+        mask_fixed = self._empty_mask_to_none(mask_fixed)
+        mask_moving = self._empty_mask_to_none(mask_moving)
 
         # Log image geometry for debugging
         self._log_image_geometry("Fixed", fixed)
@@ -115,16 +117,20 @@ class Rigid2DRegistration:
             user_moving_reg = self._expand_to_union(
                 fixed, mask_moving, 0, sitk.sitkNearestNeighbor, pad_x, pad_y
             )
-            eff_moving_mask_reg: sitk.Image = sitk.Cast(
+            eff_moving_mask_reg = sitk.Cast(
                 sitk.Cast(user_moving_reg, sitk.sitkFloat32)
                 * sitk.Cast(valid_reg_mask, sitk.sitkFloat32),
                 sitk.sitkUInt8,
             )
         else:
             eff_moving_mask_reg = valid_reg_mask
+        eff_moving_mask_reg = self._empty_mask_to_none(eff_moving_mask_reg)
 
         self._log_mask_stats("Moving valid extent mask (union grid)", valid_reg_mask)
-        self._log_mask_stats("Moving effective metric mask", eff_moving_mask_reg)
+        if eff_moving_mask_reg is not None:
+            self._log_mask_stats("Moving effective metric mask", eff_moving_mask_reg)
+        else:
+            self._log.debug("Moving effective metric mask: none")
 
         resample_transform: sitk.Transform | None = None
 
@@ -144,9 +150,12 @@ class Rigid2DRegistration:
             self._log_transform_init(f"Stage {i}/{len(effective_stages)}", init)
 
             attempts: list[tuple[sitk.Image | None, sitk.Image | None, str]] = []
-            if mask_fixed is not None:
+            if mask_fixed is not None and eff_moving_mask_reg is not None:
                 attempts.append((mask_fixed, eff_moving_mask_reg, "fixed+moving masks"))
-            attempts.append((None, eff_moving_mask_reg, "moving extent mask"))
+            if mask_fixed is not None:
+                attempts.append((mask_fixed, None, "fixed mask"))
+            if eff_moving_mask_reg is not None:
+                attempts.append((None, eff_moving_mask_reg, "moving extent mask"))
             attempts.append((None, None, "no masks"))
 
             last_exception: RuntimeError | None = None
@@ -674,6 +683,15 @@ class Rigid2DRegistration:
         total = int(arr.size)
         frac = (active / total) if total > 0 else 0.0
         return f"size={mask.GetSize()}, active={active}/{total} ({frac:.4f})"
+
+    @staticmethod
+    def _empty_mask_to_none(mask: sitk.Image | None) -> sitk.Image | None:
+        if mask is None:
+            return None
+        arr = sitk.GetArrayViewFromImage(mask)
+        if not np.any(arr > 0):
+            return None
+        return mask
 
     def _log_mask_stats(self, name: str, mask: sitk.Image) -> None:
         arr = sitk.GetArrayFromImage(mask).astype(np.uint8)

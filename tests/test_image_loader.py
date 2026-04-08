@@ -1,10 +1,15 @@
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import pytest
 import SimpleITK as sitk
 
 from sar_pattern_validation.errors import CsvFormatError
-from sar_pattern_validation.image_loader import SARImageLoader
+from sar_pattern_validation.image_loader import (
+    SARImageLoader,
+    is_registration_mask_sufficient,
+)
 from sar_pattern_validation.utils import image_extent_mm
 
 from .helpers import gaussian_2d, make_rect_grid, write_sar_csv
@@ -169,6 +174,47 @@ def test_support_masks_are_binary_and_cover_at_least_metric_masks(tmp_csv_pair):
         reference_support_u8.GetSpacing() == loader.reference_image_linear.GetSpacing()
     )
     assert reference_support_u8.GetOrigin() == loader.reference_image_linear.GetOrigin()
+
+
+def test_registration_mask_sufficiency_rejects_sparse_and_thin_masks() -> None:
+    sparse = np.zeros((32, 32), dtype=np.uint8)
+    sparse[:7, :9] = 1  # 63 active pixels -> below the minimum count threshold
+    assert not is_registration_mask_sufficient(sparse)
+
+    thin = np.zeros((32, 32), dtype=np.uint8)
+    thin[10:26, 12:16] = 1  # Adequate count, but only 4 px wide
+    assert not is_registration_mask_sufficient(thin)
+
+    dense = np.zeros((32, 32), dtype=np.uint8)
+    dense[8:18, 10:20] = 1
+    assert is_registration_mask_sufficient(dense)
+
+
+def test_loader_uses_supported_signal_when_metric_mask_is_insufficient() -> None:
+    project_root = Path(__file__).resolve().parents[1]
+    measured_csv = (
+        project_root / "data/measurements/D1950_Flat HSL_10 mm_4 dBm_10g_14.csv"
+    )
+    reference_csv = project_root / "data/database/dipole_1950MHz_Flat_10mm_10g.csv"
+
+    loader = SARImageLoader(
+        measured_path=str(measured_csv),
+        reference_path=str(reference_csv),
+        power_level_dbm=4.0,
+        noise_floor_wkg=0.05,
+        show_plot=False,
+        warn=True,
+    )
+
+    assert loader.measured_metric_mask_sufficient is False
+    assert loader.measured_peak > 1e-6
+
+    _, measured_db = loader.get_images()
+    measured_db_arr = sitk.GetArrayFromImage(measured_db)
+
+    assert np.isfinite(measured_db_arr).all()
+    assert np.ptp(measured_db_arr) > 1.0
+    assert float(np.nanmax(measured_db_arr)) <= 1e-6
 
 
 def test_loader_converts_mm_headers_to_meter_spacing(tmp_path):

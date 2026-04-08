@@ -47,7 +47,7 @@ class Artifact:
     expected: dict
 
 
-CASES = tuple(
+BASELINE_CASES = tuple(
     MeasurementValidationCase(
         case_id=f"2450_10mm_1g_{i + 1}",
         measured_csv=f"data/measurements/dipole_2450MHz_Flat_10mm_17dBm_1g_{i + 1}.csv",
@@ -56,6 +56,29 @@ CASES = tuple(
     )
     for i in range(9)
 )
+
+ROBUSTNESS_CASES = (
+    MeasurementValidationCase(
+        case_id="900_15mm_1g_sparse_rotation",
+        measured_csv="data/measurements/D900_Flat HSL_15 mm_10 dBm_1g_10.csv",
+        reference_csv="data/database/dipole_900MHz_Flat_15mm_1g.csv",
+        power_level_dbm=10.0,
+    ),
+    MeasurementValidationCase(
+        case_id="1950_10mm_10g_noisy",
+        measured_csv="data/measurements/D1950_Flat HSL_10 mm_4 dBm_10g_14.csv",
+        reference_csv="data/database/dipole_1950MHz_Flat_10mm_10g.csv",
+        power_level_dbm=4.0,
+    ),
+    MeasurementValidationCase(
+        case_id="5ghz_10mm_1g_noisy",
+        measured_csv="data/measurements/D5GHz_Flat HSL_10 mm_1 dBm_1g_15.csv",
+        reference_csv="data/database/dipole_5800MHz_Flat_10mm_1g.csv",
+        power_level_dbm=1.0,
+    ),
+)
+
+CASES = BASELINE_CASES + ROBUSTNESS_CASES
 
 
 def _artifact_json_path(case: MeasurementValidationCase) -> Path:
