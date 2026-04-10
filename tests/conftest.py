@@ -28,8 +28,13 @@ def _is_explicit_selection(config: pytest.Config) -> bool:
 
     for arg in args:
         if "::" in arg:
+            # Test node ID or specific test function
             return True
         if arg.endswith(".py"):
+            # Specific file
+            return True
+        # VS Code may pass test IDs in other formats
+        if "test_measurement_workflow_cases_" in arg:
             return True
 
     return False
