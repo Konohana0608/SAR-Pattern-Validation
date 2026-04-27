@@ -184,24 +184,24 @@ def _complete_workflow(config: WorkflowConfig) -> WorkflowResult:
                 plotting_config=config.plotting,
             )
 
-        LOGGER.info("Step 2/3: Registering measured SAR onto reference grid")
+        LOGGER.info("Step 2/3: Registering reference SAR onto measured grid")
         measured_mask_u8, reference_mask_u8 = loader.make_metric_masks()
         measured_support_u8, _ = loader.make_support_masks()
 
         reg = Rigid2DRegistration(
-            fixed_image=reference_db,
-            moving_image=measured_db,
+            fixed_image=measured_db,
+            moving_image=reference_db,
             transform_type=config.transform_type,
         )
 
         registration_stages = config.stages
         if config.registration_stage_policy == "adaptive":
             registration_stages = reg.build_adaptive_stages(
-                fixed_image=reference_db,
-                moving_image=measured_db,
+                fixed_image=measured_db,
+                moving_image=reference_db,
                 transform_type=config.transform_type,
-                fixed_mask=reference_mask_u8,
-                moving_mask=measured_mask_u8,
+                fixed_mask=measured_mask_u8,
+                moving_mask=reference_mask_u8,
                 assume_axial_symmetry=config.adaptive_assume_axial_symmetry,
                 max_stages=config.adaptive_max_stages,
                 max_stage_evals=config.adaptive_max_stage_evals,
@@ -210,8 +210,8 @@ def _complete_workflow(config: WorkflowConfig) -> WorkflowResult:
 
         aligned_db, final_tx = reg.run(
             stages=registration_stages,
-            fixed_mask=reference_mask_u8,
-            moving_mask=measured_mask_u8,
+            fixed_mask=measured_mask_u8,
+            moving_mask=reference_mask_u8,
         )
 
         if config.render_plots and (
@@ -226,7 +226,7 @@ def _complete_workflow(config: WorkflowConfig) -> WorkflowResult:
 
         if config.render_plots:
             show_registration_overlay(
-                reference_db,
+                measured_db,
                 aligned_db,
                 title="Rigid Registration Overlay",
                 image_save_path=registered_image_save_path,
@@ -242,7 +242,7 @@ def _complete_workflow(config: WorkflowConfig) -> WorkflowResult:
         evaluator = GammaMapEvaluator(
             reference_sar_linear=loader.reference_image_linear,
             measured_sar_linear=loader.measured_image_linear,
-            measured_to_reference_transform=final_tx,
+            reference_to_measured_transform=final_tx,
             dose_to_agreement_percent=float(config.dose_to_agreement),
             distance_to_agreement_mm=float(config.distance_to_agreement),
             gamma_cap=float(config.gamma_cap),
