@@ -71,12 +71,12 @@ def show_registration_overlay(
             xlim=(config.window_mm[0], config.window_mm[1]),
             ylim=(config.window_mm[2], config.window_mm[3]),
         )
-        ax.set_xlabel("$x'_e$ (mm)")
-        ax.set_ylabel("$y'_e$ (mm)")
+        ax.set_xlabel("$x_e$ (mm)")
+        ax.set_ylabel("$y_e$ (mm)")
 
         patches = [
-            mpatches.Patch(color="red", label="Reference"),
-            mpatches.Patch(color="blue", label="Measured"),
+            mpatches.Patch(color="red", label="Measured"),
+            mpatches.Patch(color="blue", label="Reference"),
             mpatches.Patch(color="magenta", label="Overlap"),
         ]
         legend = ax.legend(handles=patches, loc="lower right", frameon=True)
@@ -219,8 +219,8 @@ def plot_gamma_results(
         ax.set_title(_two_line_title("Gamma Index"))
         ax.set_xlim(config.window_mm[0], config.window_mm[1])
         ax.set_ylim(config.window_mm[2], config.window_mm[3])
-        ax.set_xlabel("$x'_e$ (mm)")
-        ax.set_ylabel("$y'_e$ (mm)")
+        ax.set_xlabel("$x_e$ (mm)")
+        ax.set_ylabel("$y_e$ (mm)")
         fig.tight_layout()
         if gamma_image_save_path is not None:
             colorbar_path_v = _derive_colorbar_path(
@@ -271,8 +271,8 @@ def plot_gamma_results(
         ax.set_title(_two_line_title("Gamma Pass / Fail Map"))
         ax.set_xlim(config.window_mm[0], config.window_mm[1])
         ax.set_ylim(config.window_mm[2], config.window_mm[3])
-        ax.set_xlabel("$x'_e$ (mm)")
-        ax.set_ylabel("$y'_e$ (mm)")
+        ax.set_xlabel("$x_e$ (mm)")
+        ax.set_ylabel("$y_e$ (mm)")
         ax.legend(
             handles=[
                 mpatches.Patch(
