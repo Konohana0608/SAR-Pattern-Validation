@@ -1,0 +1,833 @@
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+<meta charset='UTF-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1.0'>
+<title>Measurement Validation Report</title>
+<style>
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+            padding: 30px;
+        }
+        h1 {
+            color: #333;
+            margin-top: 0;
+            border-bottom: 3px solid #667eea;
+            padding-bottom: 15px;
+        }
+        h2 {
+            color: #555;
+            margin-top: 30px;
+            font-size: 1.4em;
+            border-left: 4px solid #764ba2;
+            padding-left: 15px;
+        }
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin: 20px 0;
+        }
+        .summary-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        .summary-card h3 {
+            margin: 0 0 10px 0;
+            font-size: 0.9em;
+            opacity: 0.9;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .summary-card .value {
+            font-size: 2em;
+            font-weight: bold;
+        }
+        .summary-card.passed {
+            background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+        }
+        .summary-card.failed {
+            background: linear-gradient(135deg, #ee0979 0%, #ff6a00 100%);
+        }
+        .summary-card.error {
+            background: linear-gradient(135deg, #a8001a 0%, #ff0000 100%);
+        }
+        .frequency-section {
+            margin: 30px 0;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 20px;
+            background: #f9f9f9;
+        }
+        .frequency-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 15px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid #e0e0e0;
+        }
+        .frequency-title {
+            font-size: 1.3em;
+            font-weight: bold;
+            color: #333;
+        }
+        .frequency-stats {
+            display: flex;
+            gap: 20px;
+            font-size: 0.9em;
+        }
+        .stat {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .stat-label {
+            color: #666;
+        }
+        .stat-value {
+            font-weight: bold;
+            color: #333;
+        }
+        .stat.passed .stat-value {
+            color: #11998e;
+        }
+        .stat.failed .stat-value {
+            color: #ee0979;
+        }
+        .case-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+            font-size: 0.9em;
+        }
+        .case-table th {
+            background: #e0e0e0;
+            padding: 10px;
+            text-align: left;
+            font-weight: bold;
+            color: #333;
+            border: 1px solid #ccc;
+        }
+        .case-table td {
+            padding: 10px;
+            border: 1px solid #e0e0e0;
+        }
+        .case-table tr:nth-child(even) {
+            background: #f5f5f5;
+        }
+        .status-badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-weight: bold;
+            font-size: 0.85em;
+            text-transform: uppercase;
+        }
+        .status-badge.passed {
+            background: #d4edda;
+            color: #155724;
+        }
+        .status-badge.failed {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        .status-badge.error {
+            background: #f5c6cb;
+            color: #721c24;
+        }
+        .pass-rate {
+            font-weight: bold;
+        }
+        .pass-rate.good {
+            color: #11998e;
+        }
+        .pass-rate.partial {
+            color: #ff9800;
+        }
+        .pass-rate.bad {
+            color: #d32f2f;
+        }
+        .run-info {
+            background: #f0f7ff;
+            border-left: 4px solid #667eea;
+            padding: 15px;
+            border-radius: 4px;
+            margin-top: 20px;
+            font-size: 0.85em;
+            color: #555;
+        }
+        .run-info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+            margin-top: 10px;
+        }
+        .run-info-item {
+            display: flex;
+            flex-direction: column;
+        }
+        .run-info-label {
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 3px;
+        }
+        .run-info-value {
+            font-family: monospace;
+            word-break: break-all;
+            color: #666;
+        }
+
+</style>
+</head>
+<body>
+<div class='container'>
+<h1>📊 Measurement Validation Test Report</h1>
+<div class='summary-grid'>
+
+        <div class='summary-card'>
+            <h3>Total Cases</h3>
+            <div class='value'>44</div>
+        </div>
+        <div class='summary-card passed'>
+            <h3>Passed</h3>
+            <div class='value'>28</div>
+        </div>
+        <div class='summary-card failed'>
+            <h3>Failed</h3>
+            <div class='value'>16</div>
+        </div>
+        <div class='summary-card error'>
+            <h3>Errors</h3>
+            <div class='value'>0</div>
+        </div>
+
+
+            <div class='summary-card'>
+                <h3>Aggregate Pass Rate</h3>
+                <div class='value'><span class='pass-rate partial'>91.71%</span></div>
+            </div>
+
+</div>
+<h2>Results by Frequency</h2>
+
+            <div class='frequency-section'>
+                <div class='frequency-header'>
+                    <div>
+                        <div class='frequency-title'>5.8 GHz</div>
+                    </div>
+                    <div class='frequency-stats'>
+                        <div class='stat passed'>
+                            <span class='stat-label'>Passed:</span>
+                            <span class='stat-value'>28/44</span>
+                        </div>
+                        <div class='stat failed'>
+                            <span class='stat-label'>Failed:</span>
+                            <span class='stat-value'>16</span>
+                        </div>
+                        <div class='stat'><span class='stat-label'>Pass Rate:</span><span class='stat-value pass-rate partial'>91.71%</span></div>
+                    </div>
+                </div>
+
+                <table class='case-table'>
+                    <thead>
+                        <tr>
+                            <th>Case ID</th>
+                            <th>Status</th>
+                            <th>Distance</th>
+                            <th>Mass</th>
+                            <th>Power</th>
+                            <th>Evaluated</th>
+                            <th>Failed Pixels</th>
+                            <th>Pass Rate</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+
+
+                        <tr>
+                            <td><code>5ghz_10mm_10g_1dbm_15</code></td>
+                            <td><span class='status-badge failed'>failed</span></td>
+                            <td>10 mm</td>
+                            <td>10g</td>
+                            <td>1.0 dBm</td>
+                            <td>5,384</td>
+                            <td>1,829</td>
+                            <td><span class='pass-rate bad'>66.03%</span></td>
+                        </tr>
+
+
+                        <tr>
+                            <td><code>5ghz_10mm_10g_1dbm_16</code></td>
+                            <td><span class='status-badge failed'>failed</span></td>
+                            <td>10 mm</td>
+                            <td>10g</td>
+                            <td>1.0 dBm</td>
+                            <td>5,384</td>
+                            <td>1,121</td>
+                            <td><span class='pass-rate bad'>79.18%</span></td>
+                        </tr>
+
+
+                        <tr>
+                            <td><code>5ghz_10mm_10g_1dbm_17</code></td>
+                            <td><span class='status-badge failed'>failed</span></td>
+                            <td>10 mm</td>
+                            <td>10g</td>
+                            <td>1.0 dBm</td>
+                            <td>5,384</td>
+                            <td>36</td>
+                            <td><span class='pass-rate good'>99.33%</span></td>
+                        </tr>
+
+
+                        <tr>
+                            <td><code>5ghz_10mm_10g_1dbm_18</code></td>
+                            <td><span class='status-badge failed'>failed</span></td>
+                            <td>10 mm</td>
+                            <td>10g</td>
+                            <td>1.0 dBm</td>
+                            <td>5,384</td>
+                            <td>1,235</td>
+                            <td><span class='pass-rate bad'>77.06%</span></td>
+                        </tr>
+
+
+                        <tr>
+                            <td><code>5ghz_10mm_10g_1dbm_19</code></td>
+                            <td><span class='status-badge failed'>failed</span></td>
+                            <td>10 mm</td>
+                            <td>10g</td>
+                            <td>1.0 dBm</td>
+                            <td>5,384</td>
+                            <td>876</td>
+                            <td><span class='pass-rate bad'>83.73%</span></td>
+                        </tr>
+
+
+                        <tr>
+                            <td><code>5ghz_10mm_10g_1dbm_20</code></td>
+                            <td><span class='status-badge failed'>failed</span></td>
+                            <td>10 mm</td>
+                            <td>10g</td>
+                            <td>1.0 dBm</td>
+                            <td>5,128</td>
+                            <td>1,358</td>
+                            <td><span class='pass-rate bad'>73.52%</span></td>
+                        </tr>
+
+
+                        <tr>
+                            <td><code>5ghz_10mm_10g_1dbm_21</code></td>
+                            <td><span class='status-badge failed'>failed</span></td>
+                            <td>10 mm</td>
+                            <td>10g</td>
+                            <td>1.0 dBm</td>
+                            <td>4,436</td>
+                            <td>2,174</td>
+                            <td><span class='pass-rate bad'>50.99%</span></td>
+                        </tr>
+
+
+                        <tr>
+                            <td><code>5ghz_10mm_10g_1dbm_22</code></td>
+                            <td><span class='status-badge failed'>failed</span></td>
+                            <td>10 mm</td>
+                            <td>10g</td>
+                            <td>1.0 dBm</td>
+                            <td>3,679</td>
+                            <td>1,987</td>
+                            <td><span class='pass-rate bad'>45.99%</span></td>
+                        </tr>
+
+
+                        <tr>
+                            <td><code>5ghz_10mm_1g_1dbm_16</code></td>
+                            <td><span class='status-badge failed'>failed</span></td>
+                            <td>10 mm</td>
+                            <td>1g</td>
+                            <td>1.0 dBm</td>
+                            <td>6,979</td>
+                            <td>630</td>
+                            <td><span class='pass-rate partial'>90.97%</span></td>
+                        </tr>
+
+
+                        <tr>
+                            <td><code>5ghz_10mm_1g_1dbm_17</code></td>
+                            <td><span class='status-badge failed'>failed</span></td>
+                            <td>10 mm</td>
+                            <td>1g</td>
+                            <td>1.0 dBm</td>
+                            <td>7,045</td>
+                            <td>157</td>
+                            <td><span class='pass-rate partial'>97.77%</span></td>
+                        </tr>
+
+
+                        <tr>
+                            <td><code>5ghz_10mm_1g_1dbm_18</code></td>
+                            <td><span class='status-badge failed'>failed</span></td>
+                            <td>10 mm</td>
+                            <td>1g</td>
+                            <td>1.0 dBm</td>
+                            <td>4,529</td>
+                            <td>1,635</td>
+                            <td><span class='pass-rate bad'>63.90%</span></td>
+                        </tr>
+
+
+                        <tr>
+                            <td><code>5ghz_10mm_1g_1dbm_19</code></td>
+                            <td><span class='status-badge failed'>failed</span></td>
+                            <td>10 mm</td>
+                            <td>1g</td>
+                            <td>1.0 dBm</td>
+                            <td>3,628</td>
+                            <td>527</td>
+                            <td><span class='pass-rate bad'>85.47%</span></td>
+                        </tr>
+
+
+                        <tr>
+                            <td><code>5ghz_10mm_1g_1dbm_20</code></td>
+                            <td><span class='status-badge failed'>failed</span></td>
+                            <td>10 mm</td>
+                            <td>1g</td>
+                            <td>1.0 dBm</td>
+                            <td>6,487</td>
+                            <td>1,203</td>
+                            <td><span class='pass-rate bad'>81.46%</span></td>
+                        </tr>
+
+
+                        <tr>
+                            <td><code>5ghz_10mm_1g_1dbm_21</code></td>
+                            <td><span class='status-badge failed'>failed</span></td>
+                            <td>10 mm</td>
+                            <td>1g</td>
+                            <td>1.0 dBm</td>
+                            <td>4,082</td>
+                            <td>1,158</td>
+                            <td><span class='pass-rate bad'>71.63%</span></td>
+                        </tr>
+
+
+                        <tr>
+                            <td><code>5ghz_10mm_1g_1dbm_22</code></td>
+                            <td><span class='status-badge failed'>failed</span></td>
+                            <td>10 mm</td>
+                            <td>1g</td>
+                            <td>1.0 dBm</td>
+                            <td>3,612</td>
+                            <td>946</td>
+                            <td><span class='pass-rate bad'>73.81%</span></td>
+                        </tr>
+
+
+                        <tr>
+                            <td><code>5ghz_10mm_1g_noisy</code></td>
+                            <td><span class='status-badge failed'>failed</span></td>
+                            <td>10 mm</td>
+                            <td>1g</td>
+                            <td>1.0 dBm</td>
+                            <td>7,085</td>
+                            <td>1,321</td>
+                            <td><span class='pass-rate bad'>81.35%</span></td>
+                        </tr>
+
+
+                        <tr>
+                            <td><code>5ghz_10mm_10g_10dbm_10</code></td>
+                            <td><span class='status-badge passed'>passed</span></td>
+                            <td>10 mm</td>
+                            <td>10g</td>
+                            <td>10.0 dBm</td>
+                            <td>3,095</td>
+                            <td>0</td>
+                            <td><span class='pass-rate good'>100.00%</span></td>
+                        </tr>
+
+
+                        <tr>
+                            <td><code>5ghz_10mm_10g_10dbm_11</code></td>
+                            <td><span class='status-badge passed'>passed</span></td>
+                            <td>10 mm</td>
+                            <td>10g</td>
+                            <td>10.0 dBm</td>
+                            <td>5,384</td>
+                            <td>0</td>
+                            <td><span class='pass-rate good'>100.00%</span></td>
+                        </tr>
+
+
+                        <tr>
+                            <td><code>5ghz_10mm_10g_10dbm_12</code></td>
+                            <td><span class='status-badge passed'>passed</span></td>
+                            <td>10 mm</td>
+                            <td>10g</td>
+                            <td>10.0 dBm</td>
+                            <td>5,013</td>
+                            <td>0</td>
+                            <td><span class='pass-rate good'>100.00%</span></td>
+                        </tr>
+
+
+                        <tr>
+                            <td><code>5ghz_10mm_10g_10dbm_13</code></td>
+                            <td><span class='status-badge passed'>passed</span></td>
+                            <td>10 mm</td>
+                            <td>10g</td>
+                            <td>10.0 dBm</td>
+                            <td>3,912</td>
+                            <td>0</td>
+                            <td><span class='pass-rate good'>100.00%</span></td>
+                        </tr>
+
+
+                        <tr>
+                            <td><code>5ghz_10mm_10g_10dbm_14</code></td>
+                            <td><span class='status-badge passed'>passed</span></td>
+                            <td>10 mm</td>
+                            <td>10g</td>
+                            <td>10.0 dBm</td>
+                            <td>2,153</td>
+                            <td>0</td>
+                            <td><span class='pass-rate good'>100.00%</span></td>
+                        </tr>
+
+
+                        <tr>
+                            <td><code>5ghz_10mm_10g_10dbm_8</code></td>
+                            <td><span class='status-badge passed'>passed</span></td>
+                            <td>10 mm</td>
+                            <td>10g</td>
+                            <td>10.0 dBm</td>
+                            <td>4,813</td>
+                            <td>0</td>
+                            <td><span class='pass-rate good'>100.00%</span></td>
+                        </tr>
+
+
+                        <tr>
+                            <td><code>5ghz_10mm_10g_10dbm_9</code></td>
+                            <td><span class='status-badge passed'>passed</span></td>
+                            <td>10 mm</td>
+                            <td>10g</td>
+                            <td>10.0 dBm</td>
+                            <td>4,032</td>
+                            <td>0</td>
+                            <td><span class='pass-rate good'>100.00%</span></td>
+                        </tr>
+
+
+                        <tr>
+                            <td><code>5ghz_10mm_1g_10dbm_10</code></td>
+                            <td><span class='status-badge passed'>passed</span></td>
+                            <td>10 mm</td>
+                            <td>1g</td>
+                            <td>10.0 dBm</td>
+                            <td>3,874</td>
+                            <td>0</td>
+                            <td><span class='pass-rate good'>100.00%</span></td>
+                        </tr>
+
+
+                        <tr>
+                            <td><code>5ghz_10mm_1g_10dbm_11</code></td>
+                            <td><span class='status-badge passed'>passed</span></td>
+                            <td>10 mm</td>
+                            <td>1g</td>
+                            <td>10.0 dBm</td>
+                            <td>7,000</td>
+                            <td>0</td>
+                            <td><span class='pass-rate good'>100.00%</span></td>
+                        </tr>
+
+
+                        <tr>
+                            <td><code>5ghz_10mm_1g_10dbm_12</code></td>
+                            <td><span class='status-badge passed'>passed</span></td>
+                            <td>10 mm</td>
+                            <td>1g</td>
+                            <td>10.0 dBm</td>
+                            <td>6,027</td>
+                            <td>0</td>
+                            <td><span class='pass-rate good'>100.00%</span></td>
+                        </tr>
+
+
+                        <tr>
+                            <td><code>5ghz_10mm_1g_10dbm_13</code></td>
+                            <td><span class='status-badge passed'>passed</span></td>
+                            <td>10 mm</td>
+                            <td>1g</td>
+                            <td>10.0 dBm</td>
+                            <td>4,668</td>
+                            <td>0</td>
+                            <td><span class='pass-rate good'>100.00%</span></td>
+                        </tr>
+
+
+                        <tr>
+                            <td><code>5ghz_10mm_1g_10dbm_14</code></td>
+                            <td><span class='status-badge passed'>passed</span></td>
+                            <td>10 mm</td>
+                            <td>1g</td>
+                            <td>10.0 dBm</td>
+                            <td>2,795</td>
+                            <td>0</td>
+                            <td><span class='pass-rate good'>100.00%</span></td>
+                        </tr>
+
+
+                        <tr>
+                            <td><code>5ghz_10mm_1g_10dbm_8</code></td>
+                            <td><span class='status-badge passed'>passed</span></td>
+                            <td>10 mm</td>
+                            <td>1g</td>
+                            <td>10.0 dBm</td>
+                            <td>6,137</td>
+                            <td>0</td>
+                            <td><span class='pass-rate good'>100.00%</span></td>
+                        </tr>
+
+
+                        <tr>
+                            <td><code>5ghz_10mm_1g_10dbm_9</code></td>
+                            <td><span class='status-badge passed'>passed</span></td>
+                            <td>10 mm</td>
+                            <td>1g</td>
+                            <td>10.0 dBm</td>
+                            <td>5,189</td>
+                            <td>0</td>
+                            <td><span class='pass-rate good'>100.00%</span></td>
+                        </tr>
+
+
+                        <tr>
+                            <td><code>5ghz_10mm_10g_20dbm_1</code></td>
+                            <td><span class='status-badge passed'>passed</span></td>
+                            <td>10 mm</td>
+                            <td>10g</td>
+                            <td>20.0 dBm</td>
+                            <td>5,369</td>
+                            <td>0</td>
+                            <td><span class='pass-rate good'>100.00%</span></td>
+                        </tr>
+
+
+                        <tr>
+                            <td><code>5ghz_10mm_10g_20dbm_2</code></td>
+                            <td><span class='status-badge passed'>passed</span></td>
+                            <td>10 mm</td>
+                            <td>10g</td>
+                            <td>20.0 dBm</td>
+                            <td>5,016</td>
+                            <td>0</td>
+                            <td><span class='pass-rate good'>100.00%</span></td>
+                        </tr>
+
+
+                        <tr>
+                            <td><code>5ghz_10mm_10g_20dbm_3</code></td>
+                            <td><span class='status-badge passed'>passed</span></td>
+                            <td>10 mm</td>
+                            <td>10g</td>
+                            <td>20.0 dBm</td>
+                            <td>5,246</td>
+                            <td>0</td>
+                            <td><span class='pass-rate good'>100.00%</span></td>
+                        </tr>
+
+
+                        <tr>
+                            <td><code>5ghz_10mm_10g_20dbm_4</code></td>
+                            <td><span class='status-badge passed'>passed</span></td>
+                            <td>10 mm</td>
+                            <td>10g</td>
+                            <td>20.0 dBm</td>
+                            <td>5,172</td>
+                            <td>0</td>
+                            <td><span class='pass-rate good'>100.00%</span></td>
+                        </tr>
+
+
+                        <tr>
+                            <td><code>5ghz_10mm_10g_20dbm_5</code></td>
+                            <td><span class='status-badge passed'>passed</span></td>
+                            <td>10 mm</td>
+                            <td>10g</td>
+                            <td>20.0 dBm</td>
+                            <td>4,796</td>
+                            <td>0</td>
+                            <td><span class='pass-rate good'>100.00%</span></td>
+                        </tr>
+
+
+                        <tr>
+                            <td><code>5ghz_10mm_10g_20dbm_6</code></td>
+                            <td><span class='status-badge passed'>passed</span></td>
+                            <td>10 mm</td>
+                            <td>10g</td>
+                            <td>20.0 dBm</td>
+                            <td>2,867</td>
+                            <td>0</td>
+                            <td><span class='pass-rate good'>100.00%</span></td>
+                        </tr>
+
+
+                        <tr>
+                            <td><code>5ghz_10mm_10g_20dbm_7</code></td>
+                            <td><span class='status-badge passed'>passed</span></td>
+                            <td>10 mm</td>
+                            <td>10g</td>
+                            <td>20.0 dBm</td>
+                            <td>2,961</td>
+                            <td>0</td>
+                            <td><span class='pass-rate good'>100.00%</span></td>
+                        </tr>
+
+
+                        <tr>
+                            <td><code>5ghz_10mm_1g_20dbm_1</code></td>
+                            <td><span class='status-badge passed'>passed</span></td>
+                            <td>10 mm</td>
+                            <td>1g</td>
+                            <td>20.0 dBm</td>
+                            <td>6,949</td>
+                            <td>0</td>
+                            <td><span class='pass-rate good'>100.00%</span></td>
+                        </tr>
+
+
+                        <tr>
+                            <td><code>5ghz_10mm_1g_20dbm_2</code></td>
+                            <td><span class='status-badge passed'>passed</span></td>
+                            <td>10 mm</td>
+                            <td>1g</td>
+                            <td>20.0 dBm</td>
+                            <td>6,423</td>
+                            <td>0</td>
+                            <td><span class='pass-rate good'>100.00%</span></td>
+                        </tr>
+
+
+                        <tr>
+                            <td><code>5ghz_10mm_1g_20dbm_3</code></td>
+                            <td><span class='status-badge passed'>passed</span></td>
+                            <td>10 mm</td>
+                            <td>1g</td>
+                            <td>20.0 dBm</td>
+                            <td>6,751</td>
+                            <td>0</td>
+                            <td><span class='pass-rate good'>100.00%</span></td>
+                        </tr>
+
+
+                        <tr>
+                            <td><code>5ghz_10mm_1g_20dbm_4</code></td>
+                            <td><span class='status-badge passed'>passed</span></td>
+                            <td>10 mm</td>
+                            <td>1g</td>
+                            <td>20.0 dBm</td>
+                            <td>6,640</td>
+                            <td>0</td>
+                            <td><span class='pass-rate good'>100.00%</span></td>
+                        </tr>
+
+
+                        <tr>
+                            <td><code>5ghz_10mm_1g_20dbm_5</code></td>
+                            <td><span class='status-badge passed'>passed</span></td>
+                            <td>10 mm</td>
+                            <td>1g</td>
+                            <td>20.0 dBm</td>
+                            <td>6,153</td>
+                            <td>0</td>
+                            <td><span class='pass-rate good'>100.00%</span></td>
+                        </tr>
+
+
+                        <tr>
+                            <td><code>5ghz_10mm_1g_20dbm_6</code></td>
+                            <td><span class='status-badge passed'>passed</span></td>
+                            <td>10 mm</td>
+                            <td>1g</td>
+                            <td>20.0 dBm</td>
+                            <td>3,646</td>
+                            <td>0</td>
+                            <td><span class='pass-rate good'>100.00%</span></td>
+                        </tr>
+
+
+                        <tr>
+                            <td><code>5ghz_10mm_1g_20dbm_7</code></td>
+                            <td><span class='status-badge passed'>passed</span></td>
+                            <td>10 mm</td>
+                            <td>1g</td>
+                            <td>20.0 dBm</td>
+                            <td>3,875</td>
+                            <td>0</td>
+                            <td><span class='pass-rate good'>100.00%</span></td>
+                        </tr>
+
+
+                    </tbody>
+                </table>
+            </div>
+
+<div class='run-info'>
+<h3>Run Information</h3>
+<div class='run-info-grid'>
+
+        <div class='run-info-item'>
+            <div class='run-info-label'>Generated At:</div>
+            <div class='run-info-value'>2026-04-09T15:21:34.666914+00:00</div>
+        </div>
+        <div class='run-info-item'>
+            <div class='run-info-label'>Duration:</div>
+            <div class='run-info-value'>0.0s</div>
+        </div>
+        <div class='run-info-item'>
+            <div class='run-info-label'>Exit Code:</div>
+            <div class='run-info-value'>N/A</div>
+        </div>
+        <div class='run-info-item'>
+            <div class='run-info-label'>Python Version:</div>
+            <div class='run-info-value'>3.13.7 (main, Aug 18 2025, 19:20:03) [Clang 20.1.4</div>
+        </div>
+        <div class='run-info-item'>
+            <div class='run-info-label'>Platform:</div>
+            <div class='run-info-value'>Linux-5.15.167.4-microsoft-standard-WSL2-x86_64-with-glibc2.35</div>
+        </div>
+        <div class='run-info-item'>
+            <div class='run-info-label'>Regenerate Artifacts:</div>
+            <div class='run-info-value'>No</div>
+        </div>
+        <div class='run-info-item'>
+            <div class='run-info-label'>Save Plots:</div>
+            <div class='run-info-value'>No</div>
+        </div>
+
+</div>
+</div>
+</div>
+</body>
+</html>
