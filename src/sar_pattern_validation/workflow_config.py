@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any, Final, Literal
 
 import numpy as np
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from sar_pattern_validation.registration2d import Transform2D
 
@@ -31,6 +31,13 @@ DEFAULT_PLOT_WINDOW_MM: Final[tuple[float, float, float, float]] = (
     -120.0,
     120.0,
 )
+
+# Measurement-area bounds (per MGD 2026-04-24 feedback). Inclusive upper bound,
+# exclusive lower bound — a 22 mm × 22 mm 10 g cube face must fit strictly
+# inside the area, so the area itself must exceed 22 mm on each axis.
+MEASUREMENT_AREA_MIN_MM_EXCLUSIVE: Final[float] = 22.0
+MEASUREMENT_AREA_MAX_X_MM: Final[float] = 600.0
+MEASUREMENT_AREA_MAX_Y_MM: Final[float] = 400.0
 DEFAULT_PLOT_FONT_SIZE: Final[float] = 14.0
 DEFAULT_SINGLE_FIGURE_SIZE: Final[tuple[float, float]] = (6.0, 6.0)
 DEFAULT_COMBINED_FIGURE_SIZE: Final[tuple[float, float]] = (12.0, 5.0)
@@ -144,39 +151,8 @@ class WorkflowConfig(BaseModel):
     save_failures_overlay: bool = True
     log_level: str = DEFAULT_LOG_LEVEL
     plotting: PlottingConfig = Field(default_factory=PlottingConfig)
-
-    @field_validator("log_level")
-    @classmethod
-    def _validate_log_level(cls, value: str) -> str:
-        level = value.strip().upper()
-        allowed = set(LOG_LEVEL_CHOICES)
-        if level not in allowed:
-            allowed_str = ", ".join(sorted(allowed))
-            raise ValueError(f"log_level must be one of: {allowed_str}")
-        return level
-
-    @field_validator("measured_file_path", "reference_file_path")
-    @classmethod
-    def _validate_csv_path(cls, value: str) -> str:
-        if not value.strip():
-            raise ValueError("path cannot be empty")
-        return value
-
-    @model_validator(mode="after")
-    def _validate_stage_rotation_fields(self) -> WorkflowConfig:
-        if self.transform_type == Transform2D.TRANSLATE:
-            return self
-
-        for index, stage in enumerate(self.stages):
-            if stage.rot_step_deg <= 0:
-                raise ValueError(
-                    f"stages.{index}.rot_step_deg must be > 0 for rigid registration"
-                )
-            if stage.rot_span_deg <= 0:
-                raise ValueError(
-                    f"stages.{index}.rot_span_deg must be > 0 for rigid registration"
-                )
-        return self
+    measurement_area_x_mm: float | None = None
+    measurement_area_y_mm: float | None = None
 
 
 class WorkflowResult(BaseModel):
