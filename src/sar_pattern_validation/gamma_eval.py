@@ -4,6 +4,7 @@ from pathlib import Path
 
 import numpy as np
 import SimpleITK as sitk
+from scipy.ndimage import binary_erosion
 
 from sar_pattern_validation.plotting import plot_gamma_results
 from sar_pattern_validation.utils import image_extent_mm
@@ -278,3 +279,58 @@ class GammaMapEvaluator:
     @staticmethod
     def _extent_mm(img: sitk.Image) -> tuple[float, float, float, float]:
         return image_extent_mm(img)
+
+    def evaluation_mask_fits_axis_aligned_square_mm(self, side_mm: float) -> bool:
+        """
+        Return True iff an axis-aligned square of `side_mm` physical extent
+        (in mm) fits entirely within the gamma evaluation mask, without
+        rotation. Uses the measured-grid spacing (gamma is evaluated on the
+        measured frame after Task 6.1).
+
+        Per MGD 2026-04-24 feedback (slide 7): a 22 mm × 22 mm square — the
+        face of the 10 g averaging cube — must fit inside the mask. Per-axis
+        bounding-box checks are insufficient (an L-shaped mask can pass them
+        without admitting any inscribed square).
+        """
+        if self.evaluation_mask is None:
+            raise RuntimeError(
+                "compute() must be called before evaluation_mask_fits_axis_aligned_square_mm()."
+            )
+        return _mask_fits_axis_aligned_square_mm(
+            mask=self.evaluation_mask,
+            side_mm=side_mm,
+            spacing_m=self.measured_sar_linear.GetSpacing(),
+        )
+
+
+def _mask_fits_axis_aligned_square_mm(
+    *,
+    mask: np.ndarray,
+    side_mm: float,
+    spacing_m: tuple[float, float],
+) -> bool:
+    """
+    Test whether an axis-aligned square of `side_mm` × `side_mm` physical
+    extent fits entirely inside `mask`.
+
+    Implementation: erode the mask with a rectangular structuring element of
+    pixel dimensions large enough to span `side_mm` along each axis (rounded
+    up to ensure the physical extent is at least `side_mm`). If any pixel
+    survives, a position exists where the structuring element fits entirely
+    inside the mask, i.e. the inscribed square test passes.
+    """
+    sx_mm = float(spacing_m[0]) * 1000.0
+    sy_mm = float(spacing_m[1]) * 1000.0
+    if sx_mm <= 0 or sy_mm <= 0 or side_mm <= 0:
+        return False
+
+    width_px = max(1, int(np.ceil(side_mm / sx_mm)))
+    height_px = max(1, int(np.ceil(side_mm / sy_mm)))
+
+    mask_bool = np.asarray(mask, dtype=bool)
+    if mask_bool.shape[0] < height_px or mask_bool.shape[1] < width_px:
+        return False
+
+    structure = np.ones((height_px, width_px), dtype=bool)
+    eroded = binary_erosion(mask_bool, structure=structure)
+    return bool(eroded.any())
