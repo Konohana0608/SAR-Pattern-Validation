@@ -2,13 +2,12 @@ from __future__ import annotations
 
 import argparse
 import logging
-from dataclasses import asdict, dataclass, field, is_dataclass
-from enum import Enum
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import SimpleITK as sitk
+from pydantic import BaseModel
 
 from sar_pattern_validation.errors import WorkflowExecutionError
 from sar_pattern_validation.gamma_eval import GammaMapEvaluator
@@ -20,26 +19,20 @@ from sar_pattern_validation.workflow_config import (
     DEFAULT_ADAPTIVE_ASSUME_AXIAL_SYMMETRY,
     DEFAULT_ADAPTIVE_MAX_STAGE_EVALS,
     DEFAULT_ADAPTIVE_MAX_STAGES,
-    DEFAULT_COMBINED_FIGURE_SIZE,
     DEFAULT_DISTANCE_TO_AGREEMENT,
     DEFAULT_DOSE_TO_AGREEMENT,
     DEFAULT_GAMMA_CAP,
     DEFAULT_LOG_LEVEL,
     DEFAULT_MEASURED_FILE_PATH,
     DEFAULT_NOISE_FLOOR,
-    DEFAULT_PLOT_DARK_AXES_FACECOLOR,
-    DEFAULT_PLOT_FIGURE_FACECOLOR,
-    DEFAULT_PLOT_FONT_SIZE,
-    DEFAULT_PLOT_LIGHT_AXES_FACECOLOR,
-    DEFAULT_PLOT_SAVE_DPI,
-    DEFAULT_PLOT_WINDOW_MM,
     DEFAULT_POWER_LEVEL_DBM,
     DEFAULT_REFERENCE_FILE_PATH,
     DEFAULT_REGISTRATION_STAGE_POLICY,
     DEFAULT_RENDER_PLOTS,
-    DEFAULT_SINGLE_FIGURE_SIZE,
     ROI_POLICY_CHOICES,
+    PlottingConfig,
     WorkflowConfig,
+    WorkflowResult,
 )
 from sar_pattern_validation.workflow_schema import (
     ensure_input_files_exist,
@@ -47,39 +40,6 @@ from sar_pattern_validation.workflow_schema import (
 )
 
 LOGGER = logging.getLogger(__name__)
-
-
-class WorkflowResultCLIExcludedFields(Enum):
-    """
-    Fields to exclude from CLI JSON serialization.
-
-    Note: Update these values if WorkflowResult field names change.
-    """
-
-    GAMMA_MAP = "gamma_map"
-    EVALUATION_MASK = "evaluation_mask"
-
-
-@dataclass
-class WorkflowResult:
-    pass_rate_percent: float
-    evaluated_pixel_count: int
-    passed_pixel_count: int
-    failed_pixel_count: int
-    gamma_image_path: Path | None
-    failure_image_path: Path | None
-    registered_overlay_path: Path | None
-    loaded_images_path: Path | None
-    reference_image_path: Path | None
-    measured_image_path: Path | None
-    aligned_measured_path: Path | None
-    measured_pssar: float
-    reference_pssar: float
-    scaling_error: float
-    dose_to_agreement: float
-    distance_to_agreement: float
-    gamma_map: np.ndarray | None = field(default=None, compare=False)
-    evaluation_mask: np.ndarray | None = field(default=None, compare=False)
 
 
 def _failure_overlay_path(
@@ -230,7 +190,9 @@ def _complete_workflow(config: WorkflowConfig) -> WorkflowResult:
             transform_type=config.transform_type,
         )
 
-        registration_stages = config.stages
+        registration_stages: list[dict[str, Any]] = [
+            s.model_dump() for s in config.stages
+        ]
         if config.registration_stage_policy == "adaptive":
             registration_stages = reg.build_adaptive_stages(
                 fixed_image=measured_db,
@@ -464,8 +426,8 @@ def _normalize_plotting_config(raw_config: dict[str, Any]) -> dict[str, Any]:
     plotting = normalized.get("plotting")
     if plotting is None:
         plotting = {}
-    elif is_dataclass(plotting):
-        plotting = asdict(plotting)  # type: ignore
+    elif isinstance(plotting, BaseModel):
+        plotting = plotting.model_dump()
     elif hasattr(plotting, "items"):
         plotting = dict(plotting.items())
     else:
@@ -482,21 +444,11 @@ def _normalize_plotting_config(raw_config: dict[str, Any]) -> dict[str, Any]:
         "save_dpi": normalized.pop("plot_save_dpi", None),
     }
 
-    defaults = {
-        "window_mm": DEFAULT_PLOT_WINDOW_MM,
-        "font_size": DEFAULT_PLOT_FONT_SIZE,
-        "single_figure_size": DEFAULT_SINGLE_FIGURE_SIZE,
-        "combined_figure_size": DEFAULT_COMBINED_FIGURE_SIZE,
-        "figure_facecolor": DEFAULT_PLOT_FIGURE_FACECOLOR,
-        "dark_axes_facecolor": DEFAULT_PLOT_DARK_AXES_FACECOLOR,
-        "light_axes_facecolor": DEFAULT_PLOT_LIGHT_AXES_FACECOLOR,
-        "save_dpi": DEFAULT_PLOT_SAVE_DPI,
-    }
     for key, value in cli_plotting.items():
         if value is not None:
             plotting[key] = tuple(value) if isinstance(value, list) else value
 
-    normalized["plotting"] = {**defaults, **plotting}
+    normalized["plotting"] = {**PlottingConfig().model_dump(), **plotting}
     return normalized
 
 

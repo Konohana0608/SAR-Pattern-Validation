@@ -1,6 +1,6 @@
 # Makefile to recreate pyproject.toml using uv commands
 
-.PHONY: create-pyproject clean help tests tests-fast tests-slow tests-cov measurement-validation measurement-dashboard measurement-dashboard-open lint format typecheck setup-pre-commit
+.PHONY: create-pyproject clean help sync tests tests-fast tests-slow tests-cov voila-smoke measurement-validation measurement-dashboard measurement-dashboard-open lint format typecheck setup-pre-commit
 
 # Default target
 help:
@@ -9,6 +9,7 @@ help:
 	@echo "  tests-fast           - Run only fast tests (excludes slow marker)"
 	@echo "  tests-slow           - Run only slow tests"
 	@echo "  tests-cov            - Run all tests with coverage report"
+	@echo "  voila-smoke          - Launch Voila against a temp workspace and verify the UI loads"
 	@echo "  measurement-validation - Run measurement validation in parallel with xdist"
 	@echo "  measurement-dashboard - Generate single HTML dashboard from per-frequency JSON reports"
 	@echo "  measurement-dashboard-open - Generate dashboard and open it in browser"
@@ -24,6 +25,7 @@ help:
 	@echo "  make tests                                           # Run all tests"
 	@echo "  make tests-fast                                      # Run only fast tests"
 	@echo "  make tests-slow                                      # Run only slow tests"
+	@echo "  make voila-smoke                                     # Run the Voila smoke test"
 	@echo "  make tests target=test_image_loader.py               # Run all tests in a file"
 	@echo "  make tests target=test_image_loader.py::test_parse_and_build_no_resample  # Run specific test"
 	@echo "  make lint                                            # Run Ruff linter"
@@ -61,6 +63,10 @@ tests-cov:
 	@echo "Running tests with coverage..."
 	uv run pytest -v --cov=src/sar_pattern_validation --cov-report=xml:coverage.xml --cov-report=term --cov-report=html tests/
 	@echo "Coverage report generated: coverage.xml and htmlcov/"
+
+voila-smoke:
+	@echo "Running Voila smoke test..."
+	uv run python run_voila_smoke.py
 
 measurement-validation:
 	@echo "Running measurement validation with xdist..."

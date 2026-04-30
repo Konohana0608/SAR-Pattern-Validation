@@ -10,21 +10,19 @@ This project is licensed under the MIT license terms specified in the [LICENSE](
 
 Notebook assets live under `notebooks/`:
 - `notebooks/tutorial_gamma_pattern_validation_notebook.ipynb` — tutorial walkthrough of the full validation pipeline, from CSV loading through registration and gamma evaluation.
-- `notebooks/voila.ipynb` — Voila-integrated notebook UI for interactive use of the workflow.
+- `notebooks/voila.ipynb` — thin Voila bootstrap notebook that imports the repo-local frontend package.
 
 Features:
 - **Load & preprocess**: `image_loader.py` (CSV → dense grids → SimpleITK images; absolute masking, peak normalization, dB conversion, plotting).
 - **2D registration**: `registration2d.py` (translate/rigid, exhaustive search, multi-resolution pyramid).
 - **Gamma evaluation**: `gamma_eval.py` (resample measured → reference, compute in **linear** peak-normalized space, optional ROI masks, plots).
+- **Database sample catalog**: `sample_catalog.py` (scan and filter available reference CSVs from `data/database/`).
 
 ## Install
 
 ```bash
-uv venv .venv
-source .venv/bin/activate # Windows PowerShell: .venv\Scripts\Activate.ps1
-uv pip install -e ".[dev]"
-uv pip install ipykernel
-python -m ipykernel install --user --name sar-pattern-validation --display-name "Python (sar-pattern-validation)"
+uv sync --all-groups
+uv run python -m ipykernel install --user --name sar-pattern-validation --display-name "Python (sar-pattern-validation)"
 ```
 
 If you need the repository data files under `data/database/` or `data/measurements/`, install Git LFS and pull the large CSV assets:
@@ -89,6 +87,7 @@ Broad test runs skip `slow` tests by default. Run them explicitly when needed:
 ```bash
 make tests-fast
 make tests-slow
+make voila-smoke
 ```
 
 Run the measurement validation suite in parallel:
@@ -151,12 +150,12 @@ This section documents how to set up and maintain the SAR Pattern Validation too
    In the service terminal, navigate to the workspace directory and clone the repository:
    ```bash
    cd /home/jovyan/work/workspace
-   git clone https://github.com/ITISFoundation/SAR-Pattern-Validation.git
+   git clone https://github.com/ITISFoundation/SAR-Pattern-Validation.git sar-pattern-validation
    ```
 
 3. **Copy the Makefile to the workspace**
    ```bash
-   cp SAR-Pattern-Validation/osparc_makefile/Makefile .
+   cp sar-pattern-validation/osparc_makefile/Makefile .
    ```
 
 4. **Continue with the maintenance steps below.**
@@ -176,12 +175,17 @@ This single command will:
 - Install `git-lfs` if it is not already available (via `wget`, no root required)
 - Run `git lfs pull` to download all large data files
 - Copy `voila.ipynb` from the repository into the workspace root, where Voila requires it to be
+- Keep the backend sample catalog in sync with the checked-out `data/database/` contents, because the frontend now scans available reference samples through the backend package
 
 ---
 
 ### Testing and cleaning up
 
-To test the tool, open `voila.ipynb` in the workspace, run all cells and go through the workflow.
+To test the tool, open `voila.ipynb` in the workspace, run all cells, and go through the workflow. For an automated smoke check from the repo itself, run:
+
+```bash
+make voila-smoke
+```
 
 > **Important:** The tool creates folders (`images/`, `system_state/`, `uploaded_data/`) in the workspace during a run. These must be deleted before saving the template — otherwise they will be visible to every user who instantiates a new instance from it.
 

@@ -29,7 +29,7 @@ class MeasurementValidationReportCollector:
         for name, value in report.user_properties:
             if name != REPORT_PROPERTY_NAME:
                 continue
-            payload = json.loads(value)  # type: ignore
+            payload = json.loads(value)
             break
 
         if payload is None:
@@ -244,10 +244,7 @@ def _build_smart_test_filter(
         if existing_group_counts.get(group_key, 0) < expected_count
     }
 
-    if rerun_frequencies:
-        groups_to_run = rerun_set | missing_groups
-    else:
-        groups_to_run = missing_groups
+    groups_to_run = rerun_set | missing_groups if rerun_frequencies else missing_groups
 
     if not groups_to_run and existing_group_counts:
         print(
