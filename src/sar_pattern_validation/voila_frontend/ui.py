@@ -232,14 +232,18 @@ class SarGammaComparisonUI:
         self.paths = paths or default_workspace_paths()
         self.paths.ensure_runtime_dirs()
 
-        self.logger = logging.getLogger(__name__)
-        self.logger.setLevel(logging.INFO)
         self.logging_window = OutputWidgetHandler()
         self.logging_window.setFormatter(
             logging.Formatter("%(asctime)s  - [%(levelname)s] %(message)s")
         )
-        self.logger.handlers.clear()
-        self.logger.addHandler(self.logging_window)
+        # Attach handler to the package logger so runner.py logs reach the widget too
+        _frontend_logger = logging.getLogger("sar_pattern_validation.voila_frontend")
+        _frontend_logger.handlers.clear()
+        _frontend_logger.addHandler(self.logging_window)
+        _frontend_logger.setLevel(logging.INFO)
+        _frontend_logger.propagate = False
+
+        self.logger = logging.getLogger(__name__)
 
         self.catalog = DatabaseSampleCatalog.scan(self.paths.database_path)
         self.runner = SarPatternValidationRunner(self.paths)

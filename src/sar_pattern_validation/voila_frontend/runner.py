@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import subprocess
 from pathlib import Path
 
 from .models import WorkflowResultPayload
 from .runtime import WorkspacePaths
+
+LOGGER = logging.getLogger(__name__)
 
 
 class SarPatternValidationRunner:
@@ -66,7 +69,11 @@ class SarPatternValidationRunner:
         )
         env = os.environ.copy()
         env["MPLBACKEND"] = "agg"
+        env["GIT_LFS_SKIP_SMUDGE"] = "1"
         result = subprocess.run(cmd, capture_output=True, text=True, env=env)
+        for line in result.stderr.splitlines():
+            if line.strip():
+                LOGGER.info(line)
         try:
             payload = json.loads(result.stdout)
         except json.JSONDecodeError as error:
