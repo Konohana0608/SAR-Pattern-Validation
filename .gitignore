@@ -43,3 +43,7 @@ htmlcov/
 
 # ---- Data ----
 *.zip
+
+# ---- Others ----
+.env
+.codex
