@@ -1,6 +1,6 @@
 # Makefile to recreate pyproject.toml using uv commands
 
-.PHONY: create-pyproject clean help tests tests-fast tests-slow tests-cov measurement-validation lint format typecheck setup-pre-commit
+.PHONY: create-pyproject clean help tests tests-fast tests-slow tests-cov measurement-validation measurement-dashboard measurement-dashboard-open lint format typecheck setup-pre-commit
 
 # Default target
 help:
@@ -10,6 +10,8 @@ help:
 	@echo "  tests-slow           - Run only slow tests"
 	@echo "  tests-cov            - Run all tests with coverage report"
 	@echo "  measurement-validation - Run measurement validation in parallel with xdist"
+	@echo "  measurement-dashboard - Generate single HTML dashboard from per-frequency JSON reports"
+	@echo "  measurement-dashboard-open - Generate dashboard and open it in browser"
 	@echo "  lint                 - Run Ruff lint checks"
 	@echo "  format               - Run Ruff formatter"
 	@echo "  typecheck            - Run ty type checks"
@@ -26,6 +28,8 @@ help:
 	@echo "  make tests target=test_image_loader.py::test_parse_and_build_no_resample  # Run specific test"
 	@echo "  make lint                                            # Run Ruff linter"
 	@echo "  make measurement-validation                          # Run measurement validation with xdist"
+	@echo "  make measurement-dashboard                           # Generate combined HTML dashboard"
+	@echo "  make measurement-dashboard-open                      # Generate dashboard and open it"
 	@echo "  make format                                          # Format with Ruff"
 	@echo "  make typecheck                                       # Run ty type checker"
 	@echo "  make setup-pre-commit                                # Set up pre-commit hooks"
@@ -61,6 +65,14 @@ tests-cov:
 measurement-validation:
 	@echo "Running measurement validation with xdist..."
 	uv run pytest -v -n auto --dist loadscope tests/test_measurement_validation.py --run-slow
+
+measurement-dashboard:
+	@echo "Generating combined measurement validation dashboard..."
+	python generate_and_open_measurement_validation_dashboard.py --no-open
+
+measurement-dashboard-open:
+	@echo "Generating and opening measurement validation dashboard..."
+	python generate_and_open_measurement_validation_dashboard.py
 
 lint:
 	@echo "Running Ruff linter..."

@@ -40,3 +40,6 @@ htmlcov/
 *.png
 !assets/*.png
 *.log
+
+# ---- Data ----
+*.zip

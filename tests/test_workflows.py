@@ -12,9 +12,14 @@ import sar_pattern_validation.workflows as workflows_module
 from sar_pattern_validation.errors import ConfigValidationError
 from sar_pattern_validation.gamma_eval import GammaMapEvaluator
 from sar_pattern_validation.image_loader import SARImageLoader
+from sar_pattern_validation.registration2d import Rigid2DRegistration, Transform2D
 from sar_pattern_validation.workflow_config import PlottingConfig
 from sar_pattern_validation.workflow_schema import validate_workflow_config
-from sar_pattern_validation.workflows import _apply_roi_policy, complete_workflow
+from sar_pattern_validation.workflows import (
+    _apply_roi_policy,
+    _select_registration_mask,
+    complete_workflow,
+)
 
 from .helpers import (
     gaussian_2d,
@@ -78,6 +83,60 @@ def _write_truncated_support_workflow_pair(tmp_path: Path) -> tuple[Path, Path]:
 def test_validate_workflow_config_rejects_negative_distance() -> None:
     with pytest.raises(ConfigValidationError):
         validate_workflow_config({"distance_to_agreement": -1.0})
+
+
+def test_select_registration_mask_falls_back_to_support_for_sparse_measurement() -> (
+    None
+):
+    project_root = Path(__file__).resolve().parents[1]
+    measured_csv = (
+        project_root / "data/measurements/D900_Flat HSL_15 mm_10 dBm_1g_10.csv"
+    )
+    reference_csv = project_root / "data/database/dipole_900MHz_Flat_15mm_1g.csv"
+
+    loader = SARImageLoader(
+        measured_path=str(measured_csv),
+        reference_path=str(reference_csv),
+        power_level_dbm=10.0,
+        noise_floor_wkg=0.05,
+        show_plot=False,
+        warn=True,
+    )
+
+    measured_metric_mask_u8, reference_metric_mask_u8 = loader.make_metric_masks()
+    measured_support_u8, reference_support_u8 = loader.make_support_masks()
+
+    registration_measured_mask_u8, measured_source = _select_registration_mask(
+        metric_mask_u8=measured_metric_mask_u8,
+        support_mask_u8=measured_support_u8,
+        metric_mask_sufficient=loader.measured_metric_mask_sufficient,
+    )
+    registration_reference_mask_u8, reference_source = _select_registration_mask(
+        metric_mask_u8=reference_metric_mask_u8,
+        support_mask_u8=reference_support_u8,
+        metric_mask_sufficient=loader.reference_metric_mask_sufficient,
+    )
+
+    assert measured_source == "support"
+    assert reference_source == "metric"
+    assert registration_measured_mask_u8 is measured_support_u8
+    assert registration_reference_mask_u8 is reference_metric_mask_u8
+
+    reg = Rigid2DRegistration(
+        fixed_image=loader.reference_image_db,
+        moving_image=loader.measured_image_db,
+        transform_type=Transform2D.RIGID,
+    )
+    stages = reg.build_adaptive_stages(
+        fixed_image=loader.reference_image_db,
+        moving_image=loader.measured_image_db,
+        transform_type=Transform2D.RIGID,
+        fixed_mask=registration_reference_mask_u8,
+        moving_mask=registration_measured_mask_u8,
+    )
+
+    assert stages[0]["tx_steps"] > 1
+    assert stages[0]["ty_steps"] > 2
 
 
 def test_validate_workflow_config_accepts_plotting_config() -> None:

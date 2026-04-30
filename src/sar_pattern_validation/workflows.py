@@ -120,6 +120,25 @@ def _apply_roi_policy(
     raise ValueError(f"Unsupported evaluation_roi_policy: {policy}")
 
 
+def _mask_has_active_pixels(mask: sitk.Image | None) -> bool:
+    if mask is None:
+        return False
+    return bool(np.any(sitk.GetArrayFromImage(mask) > 0))
+
+
+def _select_registration_mask(
+    *,
+    metric_mask_u8: sitk.Image,
+    support_mask_u8: sitk.Image,
+    metric_mask_sufficient: bool,
+) -> tuple[sitk.Image | None, str]:
+    if metric_mask_sufficient and _mask_has_active_pixels(metric_mask_u8):
+        return metric_mask_u8, "metric"
+    if _mask_has_active_pixels(support_mask_u8):
+        return support_mask_u8, "support"
+    return None, "none"
+
+
 def _complete_workflow(config: WorkflowConfig) -> WorkflowResult:
     try:
         ensure_input_files_exist(config)
@@ -186,7 +205,24 @@ def _complete_workflow(config: WorkflowConfig) -> WorkflowResult:
 
         LOGGER.info("Step 2/3: Registering measured SAR onto reference grid")
         measured_mask_u8, reference_mask_u8 = loader.make_metric_masks()
-        measured_support_u8, _ = loader.make_support_masks()
+        measured_support_u8, reference_support_u8 = loader.make_support_masks()
+        registration_measured_mask_u8, measured_mask_source = _select_registration_mask(
+            metric_mask_u8=measured_mask_u8,
+            support_mask_u8=measured_support_u8,
+            metric_mask_sufficient=loader.measured_metric_mask_sufficient,
+        )
+        registration_reference_mask_u8, reference_mask_source = (
+            _select_registration_mask(
+                metric_mask_u8=reference_mask_u8,
+                support_mask_u8=reference_support_u8,
+                metric_mask_sufficient=loader.reference_metric_mask_sufficient,
+            )
+        )
+        LOGGER.info(
+            "Registration mask sources: reference=%s, measured=%s",
+            reference_mask_source,
+            measured_mask_source,
+        )
 
         reg = Rigid2DRegistration(
             fixed_image=reference_db,
@@ -200,8 +236,8 @@ def _complete_workflow(config: WorkflowConfig) -> WorkflowResult:
                 fixed_image=reference_db,
                 moving_image=measured_db,
                 transform_type=config.transform_type,
-                fixed_mask=reference_mask_u8,
-                moving_mask=measured_mask_u8,
+                fixed_mask=registration_reference_mask_u8,
+                moving_mask=registration_measured_mask_u8,
                 assume_axial_symmetry=config.adaptive_assume_axial_symmetry,
                 max_stages=config.adaptive_max_stages,
                 max_stage_evals=config.adaptive_max_stage_evals,
@@ -210,8 +246,8 @@ def _complete_workflow(config: WorkflowConfig) -> WorkflowResult:
 
         aligned_db, final_tx = reg.run(
             stages=registration_stages,
-            fixed_mask=reference_mask_u8,
-            moving_mask=measured_mask_u8,
+            fixed_mask=registration_reference_mask_u8,
+            moving_mask=registration_measured_mask_u8,
         )
 
         if config.render_plots and (

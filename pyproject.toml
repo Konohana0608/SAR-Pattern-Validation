@@ -18,6 +18,7 @@ dependencies = [
 
 [project.scripts]
 sar-pattern-validation = "sar_pattern_validation.workflow_cli:main"
+sar-pattern-validation-measurement-report = "sar_pattern_validation.measurement_validation_report:main"
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]
@@ -62,7 +63,7 @@ ignore = ["B028", "E501", "N806", "N813", "N803"]
 ]
 
 [tool.pytest.ini_options]
-addopts = "-n auto --dist worksteal"
+addopts = "-n auto --dist worksteal --basetemp=.tmp/pytest"
 markers = [
     "slow: mark test as relatively slow",
     "integration: mark test as integration",

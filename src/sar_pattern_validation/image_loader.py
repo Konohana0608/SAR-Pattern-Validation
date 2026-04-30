@@ -34,6 +34,9 @@ from sar_pattern_validation.errors import CsvFormatError
 from sar_pattern_validation.plotting import plot_loaded_images, plot_sar_image
 from sar_pattern_validation.workflow_config import PlottingConfig
 
+REGISTRATION_MASK_MIN_ACTIVE_PIXELS = 64
+REGISTRATION_MASK_MIN_BBOX_PIXELS = 8
+
 
 class Grid(NamedTuple):
     sar_grid: np.ndarray
@@ -50,6 +53,37 @@ class Grid(NamedTuple):
     @property
     def spacing(self) -> tuple[float, float]:
         return (self.dx_m, self.dy_m)
+
+
+def _mask_active_bbox(mask: np.ndarray) -> tuple[int, int] | None:
+    mask_arr = np.asarray(mask, dtype=bool)
+    ys, xs = np.where(mask_arr)
+    if xs.size == 0 or ys.size == 0:
+        return None
+    width = int(xs.max() - xs.min() + 1)
+    height = int(ys.max() - ys.min() + 1)
+    return (width, height)
+
+
+def is_registration_mask_sufficient(mask: np.ndarray | sitk.Image) -> bool:
+    if isinstance(mask, sitk.Image):
+        mask_arr = sitk.GetArrayFromImage(mask).astype(bool)
+    else:
+        mask_arr = np.asarray(mask, dtype=bool)
+
+    active_pixels = int(np.count_nonzero(mask_arr))
+    if active_pixels < REGISTRATION_MASK_MIN_ACTIVE_PIXELS:
+        return False
+
+    bbox = _mask_active_bbox(mask_arr)
+    if bbox is None:
+        return False
+
+    width, height = bbox
+    return (
+        width >= REGISTRATION_MASK_MIN_BBOX_PIXELS
+        and height >= REGISTRATION_MASK_MIN_BBOX_PIXELS
+    )
 
 
 class SARImageLoader:
@@ -98,11 +132,29 @@ class SARImageLoader:
         meas_mask = (meas_sar >= cutoff_wkg) & meas_support
         ref_mask = (ref_sar >= cutoff_wkg) & ref_support
 
+        self.measured_metric_mask_sufficient = is_registration_mask_sufficient(
+            meas_mask
+        )
+        self.reference_metric_mask_sufficient = is_registration_mask_sufficient(
+            ref_mask
+        )
+
+        measured_peak_mask = (
+            meas_mask if self.measured_metric_mask_sufficient else meas_support
+        )
+        reference_peak_mask = (
+            ref_mask if self.reference_metric_mask_sufficient else ref_support
+        )
+
         self.measured_peak = (
-            float(meas_sar[meas_mask].max()) if np.any(meas_mask) else 1e-12
+            float(meas_sar[measured_peak_mask].max())
+            if np.any(measured_peak_mask)
+            else 1e-12
         )
         self.reference_peak = (
-            float(ref_sar[ref_mask].max()) if np.any(ref_mask) else 1e-12
+            float(ref_sar[reference_peak_mask].max())
+            if np.any(reference_peak_mask)
+            else 1e-12
         )
         self.measured_peak = max(self.measured_peak, 1e-12)
         self.reference_peak = max(self.reference_peak, 1e-12)
@@ -125,9 +177,17 @@ class SARImageLoader:
             ref_lin, *ref_spacing, ref_axes[0], ref_axes[1]
         )
 
-        meas_floor = cutoff_wkg / self.measured_peak
-        ref_floor = cutoff_wkg / self.reference_peak
-        shared_floor = float(max(meas_floor, ref_floor, 1e-12))
+        meas_floor = (
+            cutoff_wkg / self.measured_peak
+            if self.measured_metric_mask_sufficient
+            else 1e-12
+        )
+        ref_floor = (
+            cutoff_wkg / self.reference_peak
+            if self.reference_metric_mask_sufficient
+            else 1e-12
+        )
+        shared_floor = float(np.clip(max(meas_floor, ref_floor, 1e-12), 1e-12, 1.0))
 
         self.measured_image_db = self._linear_to_db(
             self.measured_image_linear, shared_floor
