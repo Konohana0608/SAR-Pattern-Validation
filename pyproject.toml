@@ -14,6 +14,10 @@ dependencies = [
     "scikit-image>=0.21",
     "scipy>=1.10",
     "simpleitk>=2.2.1",
+    "ipykernel>=6.27",
+    "ipywidgets>=8.1",
+    "jupyter>=1.0",
+    "voila>=0.5",
 ]
 
 [project.scripts]
@@ -26,8 +30,7 @@ build-backend = "setuptools.build_meta"
 
 [dependency-groups]
 dev = [
-    "ipykernel>=6.27",
-    "jupyter>=1.0",
+    "pillow>=10.0",
     "pre-commit>=4.3.0",
     "pytest>=8.4.2",
     "pytest-cov>=4.0",
@@ -56,14 +59,10 @@ select = ["E", "F", "W", "I", "UP", "B", "SIM", "N"]
 ignore = ["B028", "E501", "N806", "N813", "N803"]
 
 [tool.ruff.lint.per-file-ignores]
-"voila.ipynb" = [
-    "N805", # Pydantic v1 validators use cls, not self
-    "UP",   # Disable all pyupgrade rules (Python 3.9 compatibility for voila)
-    "B905", # zip() without explicit strict= (requires Python 3.10+, voila uses 3.9)
-]
+"notebooks/voila.ipynb" = ["E402", "UP"]
 
 [tool.pytest.ini_options]
-addopts = "-n auto --dist worksteal --basetemp=.tmp/pytest"
+addopts = "-n auto --dist worksteal"
 markers = [
     "slow: mark test as relatively slow",
     "integration: mark test as integration",

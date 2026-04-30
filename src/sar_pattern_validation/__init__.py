@@ -5,7 +5,8 @@ from .registration2d import (
     Rigid2DRegistration,
     Transform2D,
 )
-from .workflow_config import PlottingConfig
+from .sample_catalog import DatabaseSampleCatalog, DatabaseSampleFilters
+from .workflow_config import PlottingConfig, WorkflowConfig, WorkflowResult
 
 __all__ = [
     "SARImageLoader",
@@ -14,4 +15,8 @@ __all__ = [
     "show_registration_overlay",
     "GammaMapEvaluator",
     "PlottingConfig",
+    "WorkflowConfig",
+    "WorkflowResult",
+    "DatabaseSampleCatalog",
+    "DatabaseSampleFilters",
 ]
