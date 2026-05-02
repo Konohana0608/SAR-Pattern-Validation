@@ -51,29 +51,50 @@ _TD = "border:1px solid #555;padding:6px 10px;text-align:center;"
 
 
 class OutputWidgetHandler(logging.Handler):
-    """Custom logging handler sending logs to an output widget."""
+    """Custom logging handler rendering into a fixed-height scrollable Output widget.
+
+    Uses widgets.Output (not HTML) so emit() is safe to call from background threads.
+    Each call replaces the single display_data output with freshly rendered HTML so
+    the log list stays bounded and styled correctly.
+    """
+
+    _ROW_STYLE = "margin:0;padding:1px 0;white-space:pre-wrap;word-break:break-all;"
+    _CONTAINER_STYLE = (
+        "font-family:monospace;font-size:12px;background:#fff;color:#333;padding:4px;"
+    )
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self._lines: list[str] = []
         self.out = widgets.Output(
-            layout={
-                "width": "90%",
-                "height": "600px",
-                "border": "1px solid black",
-                "overflow": "scroll hidden",
-                "flex_flow": "column",
-                "display": "flex",
-            }
+            layout=widgets.Layout(
+                width="100%",
+                height="300px",
+                border="1px solid black",
+                overflow_y="auto",
+            )
         )
 
+    def _html(self) -> str:
+        import html as _html
+
+        rows = "".join(
+            f"<div style='{self._ROW_STYLE}'>{_html.escape(line)}</div>"
+            for line in self._lines
+        )
+        return f"<div style='{self._CONTAINER_STYLE}'>{rows}</div>"
+
     def emit(self, record) -> None:
-        formatted_record = self.format(record)
-        new_output = {
-            "name": "stdout",
-            "output_type": "stream",
-            "text": formatted_record + "\n",
-        }
-        self.out.outputs = (new_output,) + self.out.outputs
+        self._lines.insert(0, self.format(record))
+        if len(self._lines) > _MAX_LOG_LINES:
+            self._lines = self._lines[:_MAX_LOG_LINES]
+        self.out.outputs = (
+            {
+                "output_type": "display_data",
+                "data": {"text/html": self._html()},
+                "metadata": {},
+            },
+        )
 
     def show_logs(self) -> widgets.Output:
         return self.out
