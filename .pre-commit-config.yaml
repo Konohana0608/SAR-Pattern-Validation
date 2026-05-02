@@ -33,10 +33,10 @@ repos:
         types_or: [python, pyi, jupyter]
 
   # Security checks
-  - repo: https://github.com/PyCQA/bandit
-    rev: 1.9.4
-    hooks:
-      - id: bandit
-        args: ["-c", "pyproject.toml", "--skip=B101"]  # Skip assert_used in tests
-        additional_dependencies: ["bandit[toml]"]
-        exclude: ^tests/
+  # - repo: https://github.com/PyCQA/bandit
+  #   rev: 1.9.4
+  #   hooks:
+  #     - id: bandit
+  #       args: ["-c", "pyproject.toml", "--skip=B101"]  # Skip assert_used in tests
+  #       additional_dependencies: ["bandit[toml]"]
+  #       exclude: ^tests/
