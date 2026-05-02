@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any, Final, Literal
 
 import numpy as np
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from sar_pattern_validation.registration2d import Transform2D
 
@@ -109,6 +109,11 @@ class PlottingConfig(BaseModel):
         return value
 
 
+def _centered_square_window_mm(side_mm: float) -> tuple[float, float, float, float]:
+    half_side_mm = float(side_mm) / 2.0
+    return (-half_side_mm, half_side_mm, -half_side_mm, half_side_mm)
+
+
 class WorkflowConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -151,8 +156,43 @@ class WorkflowConfig(BaseModel):
     save_failures_overlay: bool = True
     log_level: str = DEFAULT_LOG_LEVEL
     plotting: PlottingConfig = Field(default_factory=PlottingConfig)
-    measurement_area_x_mm: float | None = None
-    measurement_area_y_mm: float | None = None
+    measurement_area_x_mm: float | None = Field(
+        default=None,
+        gt=MEASUREMENT_AREA_MIN_MM_EXCLUSIVE,
+        le=MEASUREMENT_AREA_MAX_X_MM,
+    )
+    measurement_area_y_mm: float | None = Field(
+        default=None,
+        gt=MEASUREMENT_AREA_MIN_MM_EXCLUSIVE,
+        le=MEASUREMENT_AREA_MAX_Y_MM,
+    )
+
+    @field_validator("log_level")
+    @classmethod
+    def _validate_log_level(cls, value: str) -> str:
+        normalized = str(value).upper()
+        if normalized not in LOG_LEVEL_CHOICES:
+            allowed = ", ".join(LOG_LEVEL_CHOICES)
+            raise ValueError(f"log_level must be one of: {allowed}")
+        return normalized
+
+    @model_validator(mode="after")
+    def _validate_measurement_area(self) -> WorkflowConfig:
+        x_mm = self.measurement_area_x_mm
+        y_mm = self.measurement_area_y_mm
+
+        if (x_mm is None) != (y_mm is None):
+            raise ValueError(
+                "measurement_area_x_mm and measurement_area_y_mm must be provided together"
+            )
+
+        if x_mm is None or y_mm is None:
+            return self
+
+        self.plotting = self.plotting.model_copy(
+            update={"window_mm": _centered_square_window_mm(max(x_mm, y_mm))}
+        )
+        return self
 
 
 class WorkflowResult(BaseModel):

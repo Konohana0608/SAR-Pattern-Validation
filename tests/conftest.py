@@ -64,14 +64,22 @@ def _should_skip_slow(config: pytest.Config) -> bool:
     return not (markexpr and "slow" in markexpr and "not slow" not in markexpr)
 
 
+def _should_skip_e2e(config: pytest.Config) -> bool:
+    if bool(config.getoption("--run-e2e")):
+        return False
+    else:
+        skip_e2e = not _is_explicit_selection(config)
+        return skip_e2e
+
+
 def pytest_runtest_setup(item: pytest.Item) -> None:
     if item.get_closest_marker("slow") and _should_skip_slow(item.config):
         pytest.skip(
             "slow test skipped by default for bulk runs; select it directly or pass --run-slow"
         )
-    if item.get_closest_marker("e2e") and not bool(item.config.getoption("--run-e2e")):
+    if item.get_closest_marker("e2e") and _should_skip_e2e(item.config):
         pytest.skip(
-            "e2e test skipped by default; pass --run-e2e and run with -p no:xdist"
+            "e2e test skipped by default for bulk runs; select it directly or pass --run-e2e and run with -p no:xdist"
         )
 
 

@@ -77,6 +77,35 @@ def test_file_upload_button_is_present(voila_page) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _ensure_run_button_enabled(voila_page) -> None:
+    csv_path = _REPO_ROOT / "notebooks" / "uploaded_data" / "measured_data.csv"
+
+    if "measured_data.csv" not in voila_page.locator("body").inner_text():
+        with voila_page.expect_file_chooser(timeout=5_000) as fc:
+            voila_page.locator(".widget-upload").click()
+        fc.value.set_files(str(csv_path))
+        voila_page.wait_for_function(
+            "() => document.body.innerText.includes('measured_data.csv')",
+            timeout=15_000,
+        )
+
+    toggle_buttons = voila_page.locator(".widget-toggle-button")
+    count = toggle_buttons.count()
+    run_btn = voila_page.locator("button:has-text('Compare Patterns')")
+
+    for i in range(count):
+        if run_btn.get_attribute("disabled") is None:
+            return
+        btn = toggle_buttons.nth(i)
+        if not btn.is_disabled():
+            btn.click()
+            voila_page.wait_for_timeout(500)
+
+    assert run_btn.get_attribute("disabled") is None, (
+        "Run button should be enabled once a measured file and unique reference are selected"
+    )
+
+
 def test_clicking_filter_button_activates_it(voila_page) -> None:
     # Toggle buttons ARE the .widget-toggle-button elements (not nested inside them)
     voila_page.locator(".widget-toggle-button").first.click()
@@ -98,39 +127,14 @@ def test_file_upload_updates_filename_label(voila_page) -> None:
 
 def test_run_button_enables_after_upload_and_unique_filter(voila_page) -> None:
     """Clicks filter buttons until exactly one reference matches, then asserts run is enabled."""
-    csv_path = _REPO_ROOT / "notebooks" / "uploaded_data" / "measured_data.csv"
-
-    # Ensure file is uploaded (previous test may have done it already)
-    if "measured_data.csv" not in voila_page.locator("body").inner_text():
-        with voila_page.expect_file_chooser(timeout=5_000) as fc:
-            voila_page.locator(".widget-upload").click()
-        fc.value.set_files(str(csv_path))
-        voila_page.wait_for_function(
-            "() => document.body.innerText.includes('measured_data.csv')",
-            timeout=15_000,
-        )
-
-    # Click one button per filter group until the run button enables
-    toggle_buttons = voila_page.locator(".widget-toggle-button")
-    count = toggle_buttons.count()
-    run_btn = voila_page.locator("button:has-text('Compare Patterns')")
-
-    for i in range(count):
-        if run_btn.get_attribute("disabled") is None:
-            break
-        btn = toggle_buttons.nth(i)
-        if not btn.is_disabled():
-            btn.click()
-            voila_page.wait_for_timeout(500)
-
-    assert run_btn.get_attribute("disabled") is None, (
-        "Run button should be enabled once a measured file and unique reference are selected"
-    )
+    _ensure_run_button_enabled(voila_page)
 
 
 def test_run_workflow_and_check_results_table(voila_page) -> None:
     """Clicks Compare Patterns and asserts the results tables render without error."""
     _WORKFLOW_TIMEOUT = 120_000  # ms — workflow can take a while on first uvx run
+
+    _ensure_run_button_enabled(voila_page)
 
     run_btn = voila_page.locator("button:has-text('Compare Patterns')")
     assert run_btn.get_attribute("disabled") is None, "Run button must be enabled first"
