@@ -26,6 +26,7 @@ pytestmark = [pytest.mark.e2e, pytest.mark.slow]
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _KERNEL_TIMEOUT = 60_000  # ms — widgets appear in ~30s after page load
+_UPLOAD_CSV_PATH = _REPO_ROOT / "data" / "example" / "measured_sSAR1g.csv"
 
 
 # ---------------------------------------------------------------------------
@@ -78,14 +79,12 @@ def test_file_upload_button_is_present(voila_page) -> None:
 
 
 def _ensure_run_button_enabled(voila_page) -> None:
-    csv_path = _REPO_ROOT / "notebooks" / "uploaded_data" / "measured_data.csv"
-
-    if "measured_data.csv" not in voila_page.locator("body").inner_text():
+    if _UPLOAD_CSV_PATH.name not in voila_page.locator("body").inner_text():
         with voila_page.expect_file_chooser(timeout=5_000) as fc:
             voila_page.locator(".widget-upload").click()
-        fc.value.set_files(str(csv_path))
+        fc.value.set_files(str(_UPLOAD_CSV_PATH))
         voila_page.wait_for_function(
-            "() => document.body.innerText.includes('measured_data.csv')",
+            f"() => document.body.innerText.includes('{_UPLOAD_CSV_PATH.name}')",
             timeout=15_000,
         )
 
@@ -114,13 +113,12 @@ def test_clicking_filter_button_activates_it(voila_page) -> None:
 
 
 def test_file_upload_updates_filename_label(voila_page) -> None:
-    csv_path = _REPO_ROOT / "notebooks" / "uploaded_data" / "measured_data.csv"
     # FileUpload triggers a native file chooser on click — intercept with expect_file_chooser
     with voila_page.expect_file_chooser(timeout=5_000) as fc:
         voila_page.locator(".widget-upload").click()
-    fc.value.set_files(str(csv_path))
+    fc.value.set_files(str(_UPLOAD_CSV_PATH))
     voila_page.wait_for_function(
-        "() => document.body.innerText.includes('measured_data.csv')",
+        f"() => document.body.innerText.includes('{_UPLOAD_CSV_PATH.name}')",
         timeout=15_000,
     )
 

@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import subprocess
 import sys
 from contextlib import redirect_stdout
@@ -299,6 +300,31 @@ def test_cli_logs_traceback_and_returns_sanitized_error_json(
     }
     assert "Workflow execution failed" in caplog.text
     assert "Traceback" in caplog.text
+
+
+def test_cli_writes_backend_log_file(tmp_path: Path) -> None:
+    log_path = tmp_path / "backend-test.log"
+    captured_stdout = __import__("io").StringIO()
+
+    with (
+        patch(
+            "sar_pattern_validation.workflow_cli.complete_workflow",
+            side_effect=RuntimeError("Bad measurement input"),
+        ),
+        patch.dict(
+            os.environ,
+            {"SAR_PATTERN_VALIDATION_BACKEND_LOG_FILE": str(log_path)},
+            clear=False,
+        ),
+        redirect_stdout(captured_stdout),
+    ):
+        exit_code = main([])
+
+    assert exit_code == 1
+    assert log_path.exists()
+    log_text = log_path.read_text(encoding="utf-8")
+    assert "Workflow execution failed" in log_text
+    assert "Traceback" in log_text
 
 
 @pytest.mark.slow

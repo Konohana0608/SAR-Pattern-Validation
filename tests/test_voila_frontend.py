@@ -75,6 +75,83 @@ def _completed_process(*, returncode: int, stdout: str, stderr: str = ""):
     )
 
 
+class _ImmediateThread:
+    def __init__(self, target=None, args=(), kwargs=None, daemon=None):
+        self._target = target
+        self._args = args
+        self._kwargs = kwargs or {}
+        self.daemon = daemon
+
+    def start(self):
+        if self._target is not None:
+            self._target(*self._args, **self._kwargs)
+
+
+def test_default_workspace_paths_uses_notebooks_dir_for_repo_checkout(
+    tmp_path: Path,
+) -> None:
+    notebook_dir = tmp_path / "sar-pattern-validation" / "notebooks"
+    (tmp_path / "sar-pattern-validation" / "src" / "sar_pattern_validation").mkdir(
+        parents=True
+    )
+    (tmp_path / "sar-pattern-validation" / "data" / "database").mkdir(parents=True)
+    notebook_dir.mkdir(parents=True)
+
+    from sar_pattern_validation.voila_frontend.runtime import default_workspace_paths
+
+    with patch(
+        "sar_pattern_validation.voila_frontend.runtime.Path.cwd",
+        return_value=notebook_dir,
+    ):
+        paths = default_workspace_paths()
+
+    assert paths.workspace_root == notebook_dir
+    assert paths.project_root == notebook_dir.parent
+
+
+def test_default_workspace_paths_uses_notebooks_dir_from_repo_root(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "sar-pattern-validation"
+    (repo_root / "src" / "sar_pattern_validation").mkdir(parents=True)
+    (repo_root / "data" / "database").mkdir(parents=True)
+    (repo_root / "notebooks").mkdir(parents=True)
+
+    from sar_pattern_validation.voila_frontend.runtime import default_workspace_paths
+
+    with patch(
+        "sar_pattern_validation.voila_frontend.runtime.Path.cwd",
+        return_value=repo_root,
+    ):
+        paths = default_workspace_paths()
+
+    assert paths.workspace_root == repo_root / "notebooks"
+    assert paths.project_root == repo_root
+    assert paths.database_path == repo_root / "data" / "database"
+
+
+def test_default_workspace_paths_uses_deployment_root_with_sibling_project(
+    tmp_path: Path,
+) -> None:
+    deployment_root = tmp_path / "deployment-root"
+    project_root = deployment_root / "sar-pattern-validation"
+    (project_root / "src" / "sar_pattern_validation").mkdir(parents=True)
+    (project_root / "data" / "database").mkdir(parents=True)
+    deployment_root.mkdir(parents=True, exist_ok=True)
+
+    from sar_pattern_validation.voila_frontend.runtime import default_workspace_paths
+
+    with patch(
+        "sar_pattern_validation.voila_frontend.runtime.Path.cwd",
+        return_value=deployment_root,
+    ):
+        paths = default_workspace_paths()
+
+    assert paths.workspace_root == deployment_root
+    assert paths.project_root == project_root
+    assert paths.database_path == project_root / "data" / "database"
+
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -123,12 +200,13 @@ def test_runner_raises_frontend_safe_error_for_backend_failure(
         stderr="Traceback (most recent call last):\nValueError: secret backend detail\n",
     )
 
-    with patch(
-        "sar_pattern_validation.voila_frontend.runner.subprocess.run",
-        return_value=failed_run,
-    ) and pytest.raises(
-        RuntimeError, match="Measured CSV could not be parsed"
-    ) as error:
+    with (
+        patch(
+            "sar_pattern_validation.voila_frontend.runner.subprocess.run",
+            return_value=failed_run,
+        ),
+        pytest.raises(RuntimeError, match="Measured CSV could not be parsed") as error,
+    ):
         runner.run_workflow(
             reference_file_path=Path("reference.csv"),
             power_level_dbm=23.0,
@@ -147,13 +225,16 @@ def test_runner_sanitizes_invalid_backend_output(
         stderr="Traceback (most recent call last):\nRuntimeError: secret backend detail\n",
     )
 
-    with patch(
-        "sar_pattern_validation.voila_frontend.runner.subprocess.run",
-        return_value=failed_run,
-    ) and pytest.raises(
-        RuntimeError,
-        match="Workflow backend returned an invalid response",
-    ) as error:
+    with (
+        patch(
+            "sar_pattern_validation.voila_frontend.runner.subprocess.run",
+            return_value=failed_run,
+        ),
+        pytest.raises(
+            RuntimeError,
+            match="Workflow backend returned an invalid response",
+        ) as error,
+    ):
         runner.run_workflow(
             reference_file_path=Path("reference.csv"),
             power_level_dbm=23.0,
@@ -161,6 +242,36 @@ def test_runner_sanitizes_invalid_backend_output(
 
     assert "Traceback" not in str(error.value)
     assert "secret backend detail" not in str(error.value)
+
+
+def test_runner_sets_timestamped_backend_log_file_env(
+    workspace_with_database: WorkspacePaths,
+) -> None:
+    runner = SarPatternValidationRunner(workspace_with_database)
+    success_run = _completed_process(
+        returncode=0,
+        stdout=json.dumps(
+            {
+                "status": "success",
+                "result": _make_result().model_dump(mode="json"),
+            }
+        ),
+    )
+
+    with patch(
+        "sar_pattern_validation.voila_frontend.runner.subprocess.run",
+        return_value=success_run,
+    ) as subprocess_run:
+        runner.run_workflow(
+            reference_file_path=Path("reference.csv"),
+            power_level_dbm=23.0,
+        )
+
+    env = subprocess_run.call_args.kwargs["env"]
+    backend_log_file = Path(env["SAR_PATTERN_VALIDATION_BACKEND_LOG_FILE"])
+    assert backend_log_file.parent == workspace_with_database.system_state_dir
+    assert backend_log_file.name.startswith("backend-")
+    assert backend_log_file.suffix == ".log"
 
 
 def test_make_transparent_png_has_correct_dimensions() -> None:
@@ -547,6 +658,10 @@ class TestSarGammaComparisonUI:
         with (
             patch.object(sar_ui, "_start_progress_updater"),
             patch.object(sar_ui, "_stop_progress_updater"),
+            patch(
+                "sar_pattern_validation.voila_frontend.ui.threading.Thread",
+                _ImmediateThread,
+            ),
             patch.object(
                 type(sar_ui.radio_button_grid),
                 "selected_reference_path",
@@ -645,9 +760,20 @@ def test_database_sample_catalog_scans_and_filters(tmp_path: Path) -> None:
     assert len(filtered) == 2
 
 
-def test_runner_uses_remote_default_and_local_override(tmp_path: Path) -> None:
-    paths = WorkspacePaths.from_workspace(tmp_path)
+def test_runner_prefers_local_checkout_only_for_repo_notebooks(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    project_root = workspace_root / "sar-pattern-validation"
+    (project_root / "src" / "sar_pattern_validation").mkdir(parents=True)
+    (project_root / "pyproject.toml").write_text(
+        "[project]\nname='sar-pattern-validation'\n", encoding="utf-8"
+    )
+    paths = WorkspacePaths.from_workspace(workspace_root)
     runner = SarPatternValidationRunner(paths)
+
+    notebook_paths = WorkspacePaths.from_repo_notebook_dir(project_root / "notebooks")
+    (project_root / "notebooks").mkdir(parents=True, exist_ok=True)
+    notebook_runner = SarPatternValidationRunner(notebook_paths)
 
     original_mode = os.environ.get("SAR_PATTERN_VALIDATION_BACKEND_MODE")
     original_local = os.environ.get("SAR_PATTERN_VALIDATION_LOCAL_PACKAGE_SOURCE")
@@ -660,10 +786,12 @@ def test_runner_uses_remote_default_and_local_override(tmp_path: Path) -> None:
         assert (
             runner.backend_source_spec() == "git+https://example.invalid/repo@feature"
         )
+        assert notebook_runner.backend_source_spec() == str(project_root)
 
         os.environ["SAR_PATTERN_VALIDATION_BACKEND_MODE"] = "local"
         os.environ["SAR_PATTERN_VALIDATION_LOCAL_PACKAGE_SOURCE"] = "/tmp/local-repo"
         assert runner.backend_source_spec() == "/tmp/local-repo"
+        assert notebook_runner.backend_source_spec() == "/tmp/local-repo"
         assert runner.build_command("--help")[:5] == [
             "uvx",
             "--no-cache",
@@ -671,6 +799,15 @@ def test_runner_uses_remote_default_and_local_override(tmp_path: Path) -> None:
             "/tmp/local-repo",
             "sar-pattern-validation",
         ]
+
+        os.environ["SAR_PATTERN_VALIDATION_BACKEND_MODE"] = "remote"
+        assert (
+            runner.backend_source_spec() == "git+https://example.invalid/repo@feature"
+        )
+        assert (
+            notebook_runner.backend_source_spec()
+            == "git+https://example.invalid/repo@feature"
+        )
     finally:
         _restore_env("SAR_PATTERN_VALIDATION_BACKEND_MODE", original_mode)
         _restore_env("SAR_PATTERN_VALIDATION_LOCAL_PACKAGE_SOURCE", original_local)
