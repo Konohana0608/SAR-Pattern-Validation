@@ -44,14 +44,10 @@ class GuiColors(str, Enum):
     TEXT_PRIMARY = "#FFFFFF"
 
 
-class ResultTableRow(str, Enum):
-    SSAR = "sSAR [W/kg]"
+_MAX_LOG_LINES = 200
 
-
-class ResultTableColumn(str, Enum):
-    REF_30_DBM = "Reference 30 dBm"
-    MEASURED_30_DBM = "Measured 30 dBm"
-    SCALING_ERROR = "Scaling Error [%]"
+_TH = "border:1px solid #555;padding:6px 10px;text-align:center;font-weight:bold;"
+_TD = "border:1px solid #555;padding:6px 10px;text-align:center;"
 
 
 class OutputWidgetHandler(logging.Handler):
@@ -273,6 +269,7 @@ class SarGammaComparisonUI:
         )
 
     def _start_progress_updater(self) -> None:
+        import contextvars
         import threading
 
         self._stop_event = threading.Event()
@@ -293,7 +290,10 @@ class SarGammaComparisonUI:
         self.progress_bar.value = 0.0
         self.progress_bar.bar_style = "info"
         self.progress_bar.style = {"bar_color": GuiColors.PRIMARY.value}
-        self._progress_thread = threading.Thread(target=update_progress, daemon=True)
+        ctx = contextvars.copy_context()
+        self._progress_thread = threading.Thread(
+            target=ctx.run, args=(update_progress,), daemon=True
+        )
         self._progress_thread.start()
 
     def _stop_progress_updater(self, *, completed: bool) -> None:
@@ -348,37 +348,53 @@ class SarGammaComparisonUI:
             self._refresh_run_button_state()
 
     def _update_analytical_results(self, results: WorkflowResultPayload) -> None:
-        passed = results.passed_pixel_count == results.evaluated_pixel_count
-        self.result_indicator_button.description = "Pass" if passed else "Fail"
-        self.result_indicator_button.style = {
-            "button_color": (
-                GuiColors.PRIMARY.value if passed else GuiColors.FAIL.value
-            ),
-            "text_color": GuiColors.TEXT_PRIMARY.value,
-        }
-        self.pass_rate_label.value = (
-            f"<b>Pass rate = {results.pass_rate_percent:.1f}%</b>"
+        power_level_dbm = float(self.power_level.value)
+        measured_at_power = results.measured_pssar * (
+            10 ** ((power_level_dbm - 30.0) / 10.0)
         )
-        values = [
-            f"{results.reference_pssar:.2f}",
-            f"{results.measured_pssar:.2f}",
-            f"{100 * results.scaling_error:.2f}",
-        ]
-        self.result_table.value = f"""
-        <table style="border-collapse: collapse; width: 100%; font-family: Arial;">
-            <thead>
-                <tr style="background-color: #f2f2f2;">
-                    <th style="border: 1px solid #ddd; padding: 8px;"></th>
-                    {"".join(f'<th style="border: 1px solid #ddd; padding: 8px;">{col.value}</th>' for col in ResultTableColumn)}
-                </tr>
-            </thead>
-            <tbody>
-                <tr>
-                    <td style="border: 1px solid #ddd; padding: 8px;"><b>{ResultTableRow.SSAR.value}</b></td>
-                    {"".join(f'<td style="border: 1px solid #ddd; padding: 8px;">{value}</td>' for value in values)}
-                </tr>
-            </tbody>
-        </table>
+        pssar_pass = abs(results.scaling_error * 100) <= 10.0
+        pattern_pass = results.pass_rate_percent >= 100.0
+
+        def result_cell(passed: bool) -> str:
+            color = GuiColors.PRIMARY.value if passed else GuiColors.FAIL.value
+            text = "Pass" if passed else "Fail"
+            return f'<td style="{_TD}"><b style="color:{color}">{text}</b></td>'
+
+        self.results_display.value = f"""
+        <div style="font-family:Arial,sans-serif;font-size:13px;">
+          <p style="margin:0 0 4px 0;">Peak spatial-average SAR (psSAR)</p>
+          <table style="border-collapse:collapse;margin-bottom:16px;">
+            <thead><tr>
+              <th style="{_TH}">Result</th>
+              <th style="{_TH}">Measured</th>
+              <th style="{_TH}">Measured, 30 dBm</th>
+              <th style="{_TH}">Reference, 30 dBm</th>
+              <th style="{_TH}">Scaling Error [%]</th>
+              <th style="{_TH}">Criteria [%]</th>
+            </tr></thead>
+            <tbody><tr>
+              {result_cell(pssar_pass)}
+              <td style="{_TD}">{measured_at_power:.2f} W/kg</td>
+              <td style="{_TD}">{results.measured_pssar:.2f} W/kg</td>
+              <td style="{_TD}">{results.reference_pssar:.2f} W/kg</td>
+              <td style="{_TD}">{results.scaling_error * 100:.2f}</td>
+              <td style="{_TD}">&le; &plusmn; 10</td>
+            </tr></tbody>
+          </table>
+          <p style="margin:0 0 4px 0;">SAR pattern match</p>
+          <table style="border-collapse:collapse;">
+            <thead><tr>
+              <th style="{_TH}">Result</th>
+              <th style="{_TH}">Pass rate</th>
+              <th style="{_TH}">Criteria</th>
+            </tr></thead>
+            <tbody><tr>
+              {result_cell(pattern_pass)}
+              <td style="{_TD}">{results.pass_rate_percent:.2f}%</td>
+              <td style="{_TD}">100%</td>
+            </tr></tbody>
+          </table>
+        </div>
         """
 
     def _on_file_upload_change(self, change: Bunch) -> None:
@@ -577,26 +593,10 @@ class SarGammaComparisonUI:
             disabled=True,
         )
         self.run_button.on_click(self.handle_button_click)
-        self.result_indicator_button = widgets.Button(
-            description="",
-            style={
-                "button_color": GuiColors.WHITE.value,
-                "text_color": GuiColors.TEXT_PRIMARY.value,
-            },
-        )
-        self.pass_rate_label = widgets.HTML(value="")
-        self.result_table = widgets.HTML(value="")
-        result_info_group = row(
-            [
-                flex_item(self.result_indicator_button, "0 0 80px"),
-                flex_item(self.pass_rate_label, "0 0 auto"),
-                flex_item(self.result_table, "2"),
-            ],
-            gap="10px",
-        )
-        results_top_section = row(
-            [flex_item(self.run_button, "0 0 auto"), result_info_group],
-            gap="40px",
+        self.results_display = widgets.HTML(value="")
+        run_button_row = row(
+            [flex_item(self.run_button, "0 0 auto")],
+            gap="0px",
         )
 
         self.progress_bar = widgets.FloatProgress(
@@ -700,7 +700,12 @@ class SarGammaComparisonUI:
         )
 
         right_results_section = col(
-            [results_top_section, progress_bar_container, images_section]
+            [
+                run_button_row,
+                progress_bar_container,
+                images_section,
+                self.results_display,
+            ]
         )
         right_results_section.layout.flex = str(right_ratio)
         main_gui_section = widgets.HBox(
