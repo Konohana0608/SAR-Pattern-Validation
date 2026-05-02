@@ -1,12 +1,41 @@
 {
   "active_filters": {
-    "antenna_type": null,
-    "distance": null,
-    "frequency": null,
-    "mass": null
+    "antenna_type": {
+      "column_name": "Antenna Type",
+      "value": "dipole"
+    },
+    "distance": {
+      "column_name": "Distance [mm]",
+      "value": 15.0
+    },
+    "frequency": {
+      "column_name": "Frequency [MHz]",
+      "value": 750.0
+    },
+    "mass": {
+      "column_name": "Mass [g]",
+      "value": 1.0
+    }
   },
-  "last_result": null,
-  "measured_file_name": "D900_Flat HSL_15 mm_10 dBm_1g_10.csv",
+  "last_result": {
+    "aligned_measured_path": "/home/ordonez/osparc-services/sar-pattern-validation/notebooks/images/aligned_means_image.png",
+    "distance_to_agreement": 2.0,
+    "dose_to_agreement": 5.0,
+    "evaluated_pixel_count": 21277,
+    "failed_pixel_count": 5746,
+    "failure_image_path": "/home/ordonez/osparc-services/sar-pattern-validation/notebooks/images/gamma_comparison_image_failures.png",
+    "gamma_image_path": "/home/ordonez/osparc-services/sar-pattern-validation/notebooks/images/gamma_comparison_image.png",
+    "loaded_images_path": null,
+    "measured_image_path": "/home/ordonez/osparc-services/sar-pattern-validation/notebooks/images/measured_image.png",
+    "measured_pssar": 26.200362509554846,
+    "pass_rate_percent": 72.99431310805095,
+    "passed_pixel_count": 15531,
+    "reference_image_path": "/home/ordonez/osparc-services/sar-pattern-validation/notebooks/images/reference_image.png",
+    "reference_pssar": 8.493816375732422,
+    "registered_overlay_path": "/home/ordonez/osparc-services/sar-pattern-validation/notebooks/images/registered_image.png",
+    "scaling_error": 2.0846396190541134
+  },
+  "measured_file_name": "measured_sSAR1g.csv",
   "power_level": 23.0,
-  "updated_at_epoch_s": 1777554595.1229968
+  "updated_at_epoch_s": 1777735848.6914551
 }

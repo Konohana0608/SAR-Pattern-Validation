@@ -3,6 +3,7 @@ from __future__ import annotations
 import html
 import io
 import logging
+import threading
 import time
 from collections.abc import Callable
 from enum import Enum
@@ -267,6 +268,7 @@ class SarGammaComparisonUI:
         self.runner = SarPatternValidationRunner(self.paths)
         self.workflow_results: WorkflowResultPayload | None = None
         self._progress_thread = None
+        self._workflow_thread = None
         self._stop_event = None
 
         self.radio_button_grid = FilterButtonGrid(self.catalog, self._on_filter_change)
@@ -313,7 +315,6 @@ class SarGammaComparisonUI:
 
     def _start_progress_updater(self) -> None:
         import contextvars
-        import threading
 
         self._stop_event = threading.Event()
         with self.progress_output:
@@ -355,6 +356,39 @@ class SarGammaComparisonUI:
             )
         }
         self.progress_output.clear_output()
+
+    def _run_workflow_task(
+        self,
+        *,
+        button: widgets.Button,
+        reference_path: Path,
+        power_level_dbm: float,
+    ) -> None:
+        try:
+            self.workflow_results = self.runner.run_workflow(
+                reference_file_path=reference_path,
+                power_level_dbm=power_level_dbm,
+            )
+            self._stop_progress_updater(completed=True)
+            self._persist_state()
+            self.update_images()
+            self._update_analytical_results(self.workflow_results)
+            self.logger.info("SAR Pattern Validation done.")
+        except Exception as error:  # noqa: BLE001
+            self._stop_progress_updater(completed=False)
+            button.style = {
+                "button_color": GuiColors.FAIL.value,
+                "text_color": GuiColors.TEXT_PRIMARY.value,
+            }
+            message = str(error).strip() or "Workflow execution failed."
+            self._set_feedback_banner(message, severity="error")
+            self.logger.warning(message)
+        finally:
+            button.style = {
+                "button_color": GuiColors.PRIMARY.value,
+                "text_color": GuiColors.TEXT_PRIMARY.value,
+            }
+            self._refresh_run_button_state()
 
     def handle_button_click(self, button: widgets.Button) -> None:
         button.style = {
