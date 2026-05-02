@@ -12,6 +12,34 @@ from .runtime import WorkspacePaths
 LOGGER = logging.getLogger(__name__)
 
 
+class WorkflowExecutionError(RuntimeError):
+    """Frontend-safe workflow execution failure."""
+
+
+def _install_hint(stdout: str, stderr: str) -> str:
+    combined_output = f"{stdout}\n{stderr}".lower()
+    if "git" not in combined_output:
+        return ""
+    return (
+        " Hint: set SAR_PATTERN_VALIDATION_BACKEND_MODE=local and "
+        "SAR_PATTERN_VALIDATION_LOCAL_PACKAGE_SOURCE=<repo-path> to avoid "
+        "remote git installation."
+    )
+
+
+def _extract_error_message(payload: object) -> str:
+    if not isinstance(payload, dict):
+        return "Workflow execution failed. Check backend logs for details."
+
+    error = payload.get("error")
+    if isinstance(error, dict):
+        message = str(error.get("message") or "").strip()
+        if message:
+            return message
+
+    return "Workflow execution failed. Check backend logs for details."
+
+
 class SarPatternValidationRunner:
     def __init__(self, paths: WorkspacePaths):
         self.paths = paths
@@ -71,29 +99,24 @@ class SarPatternValidationRunner:
         env["MPLBACKEND"] = "agg"
         env["GIT_LFS_SKIP_SMUDGE"] = "1"
         result = subprocess.run(cmd, capture_output=True, text=True, env=env)
-        for line in result.stderr.splitlines():
-            if line.strip():
-                LOGGER.info(line)
         try:
             payload = json.loads(result.stdout)
         except json.JSONDecodeError as error:
-            hint = (
-                "\nHint: set SAR_PATTERN_VALIDATION_BACKEND_MODE=local and "
-                "SAR_PATTERN_VALIDATION_LOCAL_PACKAGE_SOURCE=<repo-path> to avoid "
-                "remote git installation."
-                if "git" in result.stderr.lower() or "git" in result.stdout.lower()
-                else ""
+            message = (
+                "Workflow backend returned an invalid response."
+                " Check backend logs for details."
+                f"{_install_hint(result.stdout, result.stderr)}"
             )
-            raise RuntimeError(
-                "sar-pattern-validation did not return valid JSON.\n"
-                f"Command: {' '.join(cmd)}\n"
-                f"Return code: {result.returncode}\n"
-                f"Stdout:\n{result.stdout}\n"
-                f"Stderr:\n{result.stderr}"
-                f"{hint}"
-            ) from error
+            LOGGER.error(message)
+            raise WorkflowExecutionError(message) from error
 
         if result.returncode != 0:
-            raise RuntimeError(payload)
+            message = _extract_error_message(payload)
+            LOGGER.error("Workflow backend failed: %s", message)
+            raise WorkflowExecutionError(message)
+
+        for line in result.stderr.splitlines():
+            if line.strip():
+                LOGGER.info(line)
 
         return WorkflowResultPayload.model_validate(payload["result"])

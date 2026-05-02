@@ -1,7 +1,10 @@
 import json
+import logging
 import subprocess
 import sys
+from contextlib import redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -267,6 +270,35 @@ def test_cli_error_handling(tmp_path: Path) -> None:
     assert "error" in error_output
     assert "type" in error_output["error"]
     assert "message" in error_output["error"]
+
+
+def test_cli_logs_traceback_and_returns_sanitized_error_json(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    captured_stdout = __import__("io").StringIO()
+
+    with (
+        patch(
+            "sar_pattern_validation.workflow_cli.complete_workflow",
+            side_effect=RuntimeError("Bad measurement input"),
+        ),
+        caplog.at_level(logging.ERROR),
+        redirect_stdout(captured_stdout),
+    ):
+        exit_code = main([])
+
+    payload = json.loads(captured_stdout.getvalue())
+
+    assert exit_code == 1
+    assert payload == {
+        "status": "error",
+        "error": {
+            "type": "RuntimeError",
+            "message": "Bad measurement input",
+        },
+    }
+    assert "Workflow execution failed" in caplog.text
+    assert "Traceback" in caplog.text
 
 
 @pytest.mark.slow

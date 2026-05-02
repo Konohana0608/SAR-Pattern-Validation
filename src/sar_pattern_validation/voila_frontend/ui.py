@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import io
 import logging
 import time
@@ -293,6 +294,23 @@ class SarGammaComparisonUI:
             and self.radio_button_grid.selected_reference_path is not None
         )
 
+    def _set_feedback_banner(self, message: str, *, severity: str) -> None:
+        palette = {
+            "error": ("#FDE8E8", GuiColors.FAIL.value, "#7B1515", "Error"),
+            "warning": ("#FFF3CD", "#B8860B", "#7B6015", "Warning"),
+        }
+        background, border, text_color, label = palette[severity]
+        escaped_message = html.escape(message.strip())
+        self.feedback_banner.value = (
+            f'<div style="background:{background};border-left:4px solid {border};'
+            "padding:8px 12px;border-radius:6px;font-size:13px;"
+            f'color:{text_color};font-family:Arial,sans-serif;">'
+            f"<b>{label}:</b> {escaped_message}</div>"
+        )
+
+    def _clear_feedback_banner(self) -> None:
+        self.feedback_banner.value = ""
+
     def _start_progress_updater(self) -> None:
         import contextvars
         import threading
@@ -344,6 +362,7 @@ class SarGammaComparisonUI:
             "text_color": GuiColors.TEXT_PRIMARY.value,
         }
         button.disabled = True
+        self._clear_feedback_banner()
         self._start_progress_updater()
         try:
             reference_path = self.radio_button_grid.selected_reference_path
@@ -364,7 +383,9 @@ class SarGammaComparisonUI:
                 "button_color": GuiColors.FAIL.value,
                 "text_color": GuiColors.TEXT_PRIMARY.value,
             }
-            self.logger.warning(error)
+            message = str(error).strip() or "Workflow execution failed."
+            self._set_feedback_banner(message, severity="error")
+            self.logger.warning(message)
         finally:
             button.style = {
                 "button_color": GuiColors.PRIMARY.value,
@@ -618,6 +639,7 @@ class SarGammaComparisonUI:
             disabled=True,
         )
         self.run_button.on_click(self.handle_button_click)
+        self.feedback_banner = widgets.HTML(value="")
         self.results_display = widgets.HTML(value="")
         run_button_row = row(
             [flex_item(self.run_button, "0 0 auto")],
@@ -728,6 +750,7 @@ class SarGammaComparisonUI:
             [
                 run_button_row,
                 progress_bar_container,
+                self.feedback_banner,
                 images_section,
                 self.results_display,
             ]

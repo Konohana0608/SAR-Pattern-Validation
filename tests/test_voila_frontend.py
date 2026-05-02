@@ -1,12 +1,14 @@
 import io
 import json
 import os
+import subprocess
 from pathlib import Path
 from unittest.mock import PropertyMock, patch
 
 import pandas as pd
 import pytest
 from PIL import Image
+from traitlets.utils.bunch import Bunch
 
 from sar_pattern_validation.sample_catalog import (
     DatabaseSampleCatalog,
@@ -64,6 +66,15 @@ def _write_png(path: Path, width: int = 100, height: int = 200) -> None:
         img.save(path, format="PNG")
 
 
+def _completed_process(*, returncode: int, stdout: str, stderr: str = ""):
+    return subprocess.CompletedProcess(
+        args=["sar-pattern-validation"],
+        returncode=returncode,
+        stdout=stdout,
+        stderr=stderr,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -92,6 +103,64 @@ def filter_grid(small_catalog: DatabaseSampleCatalog) -> FilterButtonGrid:
 # ---------------------------------------------------------------------------
 # Image utility tests
 # ---------------------------------------------------------------------------
+
+
+def test_runner_raises_frontend_safe_error_for_backend_failure(
+    workspace_with_database: WorkspacePaths,
+) -> None:
+    runner = SarPatternValidationRunner(workspace_with_database)
+    failed_run = _completed_process(
+        returncode=1,
+        stdout=json.dumps(
+            {
+                "status": "error",
+                "error": {
+                    "type": "ValueError",
+                    "message": "Measured CSV could not be parsed.",
+                },
+            }
+        ),
+        stderr="Traceback (most recent call last):\nValueError: secret backend detail\n",
+    )
+
+    with patch(
+        "sar_pattern_validation.voila_frontend.runner.subprocess.run",
+        return_value=failed_run,
+    ) and pytest.raises(
+        RuntimeError, match="Measured CSV could not be parsed"
+    ) as error:
+        runner.run_workflow(
+            reference_file_path=Path("reference.csv"),
+            power_level_dbm=23.0,
+        )
+
+    assert "Traceback" not in str(error.value)
+
+
+def test_runner_sanitizes_invalid_backend_output(
+    workspace_with_database: WorkspacePaths,
+) -> None:
+    runner = SarPatternValidationRunner(workspace_with_database)
+    failed_run = _completed_process(
+        returncode=1,
+        stdout="not-json",
+        stderr="Traceback (most recent call last):\nRuntimeError: secret backend detail\n",
+    )
+
+    with patch(
+        "sar_pattern_validation.voila_frontend.runner.subprocess.run",
+        return_value=failed_run,
+    ) and pytest.raises(
+        RuntimeError,
+        match="Workflow backend returned an invalid response",
+    ) as error:
+        runner.run_workflow(
+            reference_file_path=Path("reference.csv"),
+            power_level_dbm=23.0,
+        )
+
+    assert "Traceback" not in str(error.value)
+    assert "secret backend detail" not in str(error.value)
 
 
 def test_make_transparent_png_has_correct_dimensions() -> None:
@@ -179,6 +248,7 @@ def test_filter_button_grid_toggle_deselects_sibling(
     btn_2450.value = True
 
     assert not btn_900.value
+    assert filter_grid.filter_options.frequency is not None
     assert filter_grid.filter_options.frequency.value == 2450.0
 
 
@@ -315,6 +385,7 @@ class TestSarGammaComparisonUI:
         assert isinstance(sar_ui.run_button, widgets.Button)
         assert isinstance(sar_ui.upload_1, widgets.FileUpload)
         assert isinstance(sar_ui.progress_bar, widgets.FloatProgress)
+        assert isinstance(sar_ui.feedback_banner, widgets.HTML)
         assert isinstance(sar_ui.results_display, widgets.HTML)
 
     def test_run_button_enables_when_file_and_unique_filter(
@@ -369,16 +440,16 @@ class TestSarGammaComparisonUI:
         self, sar_ui: SarGammaComparisonUI
     ) -> None:
         sar_ui.workflow_results = _make_result(pass_rate_percent=88.0)
-        assert sar_ui._build_state().last_result is not None
-        assert sar_ui._build_state().last_result.pass_rate_percent == 88.0
+        last_result = sar_ui._build_state().last_result
+        assert last_result is not None
+        assert last_result.pass_rate_percent == 88.0
 
     def test_file_upload_change_writes_file_to_disk(
         self, sar_ui: SarGammaComparisonUI
     ) -> None:
         content = b"x,y,sar\n0,0,1\n"
-        sar_ui._on_file_upload_change(
-            {"new": [{"name": "data.csv", "content": content}]}
-        )
+        bunch = Bunch(new=[{"name": "data.csv", "content": content}])  # type: ignore
+        sar_ui._on_file_upload_change(bunch)
 
         assert sar_ui.paths.measured_file_path.exists()
         assert sar_ui.paths.measured_file_path.read_bytes() == content
@@ -386,14 +457,13 @@ class TestSarGammaComparisonUI:
     def test_file_upload_change_updates_label(
         self, sar_ui: SarGammaComparisonUI
     ) -> None:
-        sar_ui._on_file_upload_change(
-            {"new": [{"name": "my_data.csv", "content": b"x\n"}]}
-        )
+        bunch = Bunch(new=[{"name": "my_data.csv", "content": b"x\n"}])  # type: ignore
+        sar_ui._on_file_upload_change(bunch)
         assert sar_ui.uploaded_file_name_label.value == "my_data.csv"
 
     def test_file_upload_empty_clears_label(self, sar_ui: SarGammaComparisonUI) -> None:
         sar_ui.uploaded_file_name_label.value = "old.csv"
-        sar_ui._on_file_upload_change({"new": []})
+        sar_ui._on_file_upload_change(Bunch(new=[]))
         assert sar_ui.uploaded_file_name_label.value == ""
 
     def test_update_analytical_results_shows_pass(
@@ -467,6 +537,32 @@ class TestSarGammaComparisonUI:
     ) -> None:
         assert not sar_ui.paths.ui_state_path.exists()
         sar_ui.restore_state()
+
+    def test_handle_button_click_shows_sanitized_error_banner(
+        self, sar_ui: SarGammaComparisonUI, tmp_path: Path
+    ) -> None:
+        sar_ui.paths.measured_file_path.parent.mkdir(parents=True, exist_ok=True)
+        sar_ui.paths.measured_file_path.write_text("x,y,sar\n0,0,1\n", encoding="utf-8")
+
+        with (
+            patch.object(sar_ui, "_start_progress_updater"),
+            patch.object(sar_ui, "_stop_progress_updater"),
+            patch.object(
+                type(sar_ui.radio_button_grid),
+                "selected_reference_path",
+                new_callable=PropertyMock,
+                return_value=tmp_path / "reference.csv",
+            ),
+            patch.object(
+                sar_ui.runner,
+                "run_workflow",
+                side_effect=RuntimeError("Measured CSV could not be parsed."),
+            ),
+        ):
+            sar_ui.handle_button_click(sar_ui.run_button)
+
+        assert "Measured CSV could not be parsed." in sar_ui.feedback_banner.value
+        assert "Traceback" not in sar_ui.feedback_banner.value
 
 
 # ---------------------------------------------------------------------------

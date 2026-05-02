@@ -62,11 +62,13 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     except Exception as exc:
+        logging.getLogger(__name__).exception("Workflow execution failed")
+
         error_payload = {
             "status": "error",
             "error": {
                 "type": type(exc).__name__,
-                "message": str(exc),
+                "message": str(exc).strip() or "Workflow execution failed.",
             },
         }
 
