@@ -1,5 +1,5 @@
 WORKSPACE_DIR  := /home/jovyan/work/workspace
-REPO_DIR       := $(WORKSPACE_DIR)/SAR-Pattern-Validation
+REPO_DIR       := $(WORKSPACE_DIR)/sar-pattern-validation
 GIT_LFS_VERSION := 3.6.1
 GIT_LFS_BIN    := $(HOME)/.local/bin/git-lfs
 

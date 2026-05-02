@@ -1,0 +1,12 @@
+{
+  "active_filters": {
+    "antenna_type": null,
+    "distance": null,
+    "frequency": null,
+    "mass": null
+  },
+  "last_result": null,
+  "measured_file_name": "D900_Flat HSL_15 mm_10 dBm_1g_10.csv",
+  "power_level": 23.0,
+  "updated_at_epoch_s": 1777554595.1229968
+}

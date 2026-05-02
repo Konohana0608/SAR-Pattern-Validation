@@ -2,9 +2,6 @@ name: CI
 
 on:
   pull_request:
-  push:
-    branches:
-      - "**"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -50,7 +47,7 @@ jobs:
 
       - name: Run fast tests with coverage
         shell: bash
-        run: uv run pytest -v -m "not slow" --cov=src/sar_pattern_validation --cov-report=xml:coverage.xml --cov-report=term tests/
+        run: uv run python -m pytest -v -m "not slow" --cov=src/sar_pattern_validation --cov-report=xml:coverage.xml --cov-report=term tests/
 
       - name: Upload fast coverage artifact
         uses: actions/upload-artifact@v4
@@ -100,7 +97,7 @@ jobs:
 
       - name: Run full test suite with slow tests and coverage
         shell: bash
-        run: uv run pytest -v --run-slow --cov=src/sar_pattern_validation --cov-report=xml:coverage.xml --cov-report=term tests/
+        run: uv run python -m pytest -v --run-slow --cov=src/sar_pattern_validation --cov-report=xml:coverage.xml --cov-report=term tests/
 
       - name: Upload slow coverage artifact
         uses: actions/upload-artifact@v4
@@ -109,3 +106,42 @@ jobs:
           path: coverage.xml
           if-no-files-found: error
           retention-days: 30
+
+  voila-smoke:
+    name: Voila smoke
+    runs-on: ubuntu-latest
+    needs:
+      - fast-tests
+    container:
+      image: itisfoundation/jupyter-math:3.0.5
+    env:
+      DISPLAY: ":0"
+      NVIDIA_DRIVER_CAPABILITIES: all
+      SAR_PATTERN_VALIDATION_BACKEND_MODE: local
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        shell: bash
+        run: |
+          apt-get update
+          apt-get install -y gnupg git-lfs time procps tree curl
+          git lfs install --force
+          git lfs pull
+          apt-key adv --fetch-keys https://developer.download.nvidia.com/compute/cuda/repos/ubuntu1804/x86_64/3bf863cc.pub
+          apt-key adv --fetch-keys https://developer.download.nvidia.com/compute/machine-learning/repos/ubuntu1804/x86_64/7fa2af80.pub
+
+      - name: Install uv
+        shell: bash
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR="/usr/local/bin" sh
+          uv --version
+
+      - name: Sync dependencies
+        shell: bash
+        run: uv sync --all-groups
+
+      - name: Run Voila smoke test
+        shell: bash
+        run: uv run python run_voila_smoke.py

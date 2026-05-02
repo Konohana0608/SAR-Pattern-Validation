@@ -1,7 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Final, Literal
+
+import numpy as np
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from sar_pattern_validation.registration2d import Transform2D
 
@@ -66,20 +69,42 @@ def default_registration_stages() -> list[dict[str, Any]]:
     ]
 
 
-@dataclass
-class PlottingConfig:
+class RegistrationStage(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    translation_step: float = Field(gt=0)
+    rot_step_deg: float = Field(ge=0)
+    rot_span_deg: float = Field(ge=0)
+    tx_steps: int = Field(ge=0)
+    ty_steps: int = Field(ge=0)
+
+    def __getitem__(self, key: str) -> Any:
+        return getattr(self, key)
+
+
+class PlottingConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     window_mm: tuple[float, float, float, float] = DEFAULT_PLOT_WINDOW_MM
-    font_size: float = DEFAULT_PLOT_FONT_SIZE
+    font_size: float = Field(default=DEFAULT_PLOT_FONT_SIZE, gt=0)
     single_figure_size: tuple[float, float] = DEFAULT_SINGLE_FIGURE_SIZE
     combined_figure_size: tuple[float, float] = DEFAULT_COMBINED_FIGURE_SIZE
     figure_facecolor: str = DEFAULT_PLOT_FIGURE_FACECOLOR
     dark_axes_facecolor: str = DEFAULT_PLOT_DARK_AXES_FACECOLOR
     light_axes_facecolor: str = DEFAULT_PLOT_LIGHT_AXES_FACECOLOR
-    save_dpi: int = DEFAULT_PLOT_SAVE_DPI
+    save_dpi: int = Field(default=DEFAULT_PLOT_SAVE_DPI, gt=0)
+
+    @field_validator("single_figure_size", "combined_figure_size")
+    @classmethod
+    def _validate_figure_size(cls, value: tuple[float, float]) -> tuple[float, float]:
+        if value[0] <= 0 or value[1] <= 0:
+            raise ValueError("figure sizes must be positive")
+        return value
 
 
-@dataclass
-class WorkflowConfig:
+class WorkflowConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     measured_file_path: str = DEFAULT_MEASURED_FILE_PATH
     reference_file_path: str = DEFAULT_REFERENCE_FILE_PATH
     power_level_dbm: float = DEFAULT_POWER_LEVEL_DBM
@@ -91,25 +116,148 @@ class WorkflowConfig:
     registered_image_save_path: str | None = None
     gamma_comparison_image_path: str | None = None
 
-    resample_resolution: float | None = None
-    noise_floor: float = DEFAULT_NOISE_FLOOR
+    resample_resolution: float | None = Field(default=None, gt=0)
+    noise_floor: float = Field(default=DEFAULT_NOISE_FLOOR, gt=0)
     show_plot: bool = DEFAULT_SHOW_PLOT
     render_plots: bool = DEFAULT_RENDER_PLOTS
 
     transform_type: Transform2D = Transform2D.RIGID
-    stages: list[dict[str, Any]] = field(default_factory=default_registration_stages)
+    stages: list[RegistrationStage] = Field(
+        default_factory=lambda: [
+            RegistrationStage.model_validate(stage)
+            for stage in default_registration_stages()
+        ]
+    )
     registration_stage_policy: Literal["static", "adaptive"] = (
         DEFAULT_REGISTRATION_STAGE_POLICY
     )
     adaptive_assume_axial_symmetry: bool = DEFAULT_ADAPTIVE_ASSUME_AXIAL_SYMMETRY
-    adaptive_max_stages: int = DEFAULT_ADAPTIVE_MAX_STAGES
-    adaptive_max_stage_evals: int = DEFAULT_ADAPTIVE_MAX_STAGE_EVALS
+    adaptive_max_stages: int = Field(default=DEFAULT_ADAPTIVE_MAX_STAGES, ge=1, le=8)
+    adaptive_max_stage_evals: int = Field(
+        default=DEFAULT_ADAPTIVE_MAX_STAGE_EVALS, ge=100, le=1_000_000
+    )
 
-    dose_to_agreement: float = DEFAULT_DOSE_TO_AGREEMENT
-    distance_to_agreement: float = DEFAULT_DISTANCE_TO_AGREEMENT
-    gamma_cap: float = DEFAULT_GAMMA_CAP
+    dose_to_agreement: float = Field(default=DEFAULT_DOSE_TO_AGREEMENT, gt=0)
+    distance_to_agreement: float = Field(default=DEFAULT_DISTANCE_TO_AGREEMENT, gt=0)
+    gamma_cap: float = Field(default=DEFAULT_GAMMA_CAP, gt=0)
     evaluation_roi_policy: EvaluationRoiPolicy = DEFAULT_EVALUATION_ROI_POLICY
-
     save_failures_overlay: bool = True
     log_level: str = DEFAULT_LOG_LEVEL
-    plotting: PlottingConfig = field(default_factory=PlottingConfig)
+    plotting: PlottingConfig = Field(default_factory=PlottingConfig)
+
+    @field_validator("log_level")
+    @classmethod
+    def _validate_log_level(cls, value: str) -> str:
+        level = value.strip().upper()
+        allowed = set(LOG_LEVEL_CHOICES)
+        if level not in allowed:
+            allowed_str = ", ".join(sorted(allowed))
+            raise ValueError(f"log_level must be one of: {allowed_str}")
+        return level
+
+    @field_validator("measured_file_path", "reference_file_path")
+    @classmethod
+    def _validate_csv_path(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("path cannot be empty")
+        return value
+
+    @model_validator(mode="after")
+    def _validate_stage_rotation_fields(self) -> WorkflowConfig:
+        if self.transform_type == Transform2D.TRANSLATE:
+            return self
+
+        for index, stage in enumerate(self.stages):
+            if stage.rot_step_deg <= 0:
+                raise ValueError(
+                    f"stages.{index}.rot_step_deg must be > 0 for rigid registration"
+                )
+            if stage.rot_span_deg <= 0:
+                raise ValueError(
+                    f"stages.{index}.rot_span_deg must be > 0 for rigid registration"
+                )
+        return self
+
+
+class WorkflowResult(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
+
+    pass_rate_percent: float
+    evaluated_pixel_count: int
+    passed_pixel_count: int
+    failed_pixel_count: int
+    gamma_image_path: Path | None
+    failure_image_path: Path | None
+    registered_overlay_path: Path | None
+    loaded_images_path: Path | None
+    reference_image_path: Path | None
+    measured_image_path: Path | None
+    aligned_measured_path: Path | None
+    measured_pssar: float
+    reference_pssar: float
+    scaling_error: float
+    dose_to_agreement: float
+    distance_to_agreement: float
+    gamma_map: np.ndarray | None = Field(default=None, exclude=True, repr=False)
+    evaluation_mask: np.ndarray | None = Field(default=None, exclude=True, repr=False)
+
+    @field_validator(
+        "gamma_image_path",
+        "failure_image_path",
+        "registered_overlay_path",
+        "loaded_images_path",
+        "reference_image_path",
+        "measured_image_path",
+        "aligned_measured_path",
+        mode="before",
+    )
+    @classmethod
+    def _coerce_path(cls, value: str | Path | None) -> Path | None:
+        if value is None or isinstance(value, Path):
+            return value
+        return Path(value)
+
+    @field_validator("pass_rate_percent")
+    @classmethod
+    def _validate_pass_rate(cls, value: float) -> float:
+        if not 0.0 <= value <= 100.0:
+            raise ValueError("pass_rate_percent must be between 0 and 100")
+        return value
+
+    @field_validator(
+        "evaluated_pixel_count", "passed_pixel_count", "failed_pixel_count"
+    )
+    @classmethod
+    def _validate_counts(cls, value: int) -> int:
+        if value < 0:
+            raise ValueError("pixel counts must be non-negative")
+        return value
+
+    @field_validator("scaling_error")
+    @classmethod
+    def _validate_scaling_error(cls, value: float) -> float:
+        if not isinstance(value, float):
+            raise ValueError("scaling_error must be a float")
+        return value
+
+    def __str__(self) -> str:
+        items: list[str] = []
+        max_len = max(len(key) for key in self.__class__.model_fields)
+        for key, value in self:
+            value_str = str(value) if isinstance(value, Path) else repr(value)
+            items.append(f"{key.ljust(max_len)} : {value_str}")
+        return "\n".join(items)
+
+    def save_to_json(self, path: str | Path) -> None:
+        file_path = Path(path)
+        file_path.parent.mkdir(exist_ok=True, parents=True)
+        file_path.write_text(
+            self.model_dump_json(indent=2, exclude={"gamma_map", "evaluation_mask"}),
+            encoding="utf-8",
+        )
+
+    @classmethod
+    def load_from_json(cls, path: str | Path) -> WorkflowResult:
+        import json
+
+        return cls.model_validate(json.loads(Path(path).read_text(encoding="utf-8")))

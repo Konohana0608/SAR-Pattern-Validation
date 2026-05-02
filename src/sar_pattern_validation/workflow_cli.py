@@ -3,29 +3,18 @@ from __future__ import annotations
 import json
 import logging
 import sys
-from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from typing import Any
 
-from sar_pattern_validation.workflows import (
-    WorkflowResultCLIExcludedFields,
-    complete_workflow,
-)
+from pydantic import BaseModel
+
+from sar_pattern_validation.workflows import complete_workflow
 
 
 def _serialize(obj: Any) -> Any:
-    """
-    Recursively convert objects into JSON-serializable structures.
-    Handles:
-      - dataclasses (excluding fields defined in WorkflowResultCLIExcludedFields)
-      - pathlib.Path
-      - nested dicts/lists
-    """
-    if is_dataclass(obj):
-        excluded_fields = {field.value for field in WorkflowResultCLIExcludedFields}
-        return {
-            k: _serialize(v) for k, v in asdict(obj).items() if k not in excluded_fields
-        }
+    """Recursively convert objects into JSON-serializable structures."""
+    if isinstance(obj, BaseModel):
+        return obj.model_dump(mode="json")
     if isinstance(obj, Path):
         return str(obj)
     if isinstance(obj, dict):
