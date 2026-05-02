@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 
 import pandas as pd
+from pydantic import ValidationError
 
 from sar_pattern_validation.sample_catalog import (
     DatabaseSampleColumn,
@@ -31,7 +33,15 @@ def save_ui_state(paths: WorkspacePaths, state: UiState) -> None:
 def load_ui_state(paths: WorkspacePaths) -> UiState | None:
     if not paths.ui_state_path.exists():
         return None
-    return UiState.model_validate_json(paths.ui_state_path.read_text(encoding="utf-8"))
+    try:
+        return UiState.model_validate_json(
+            paths.ui_state_path.read_text(encoding="utf-8")
+        )
+    except (ValidationError, json.JSONDecodeError):
+        logging.getLogger(__name__).warning(
+            "Saved UI state is invalid or stale — starting fresh."
+        )
+        return None
 
 
 def load_or_migrate_ui_state(paths: WorkspacePaths) -> UiState | None:

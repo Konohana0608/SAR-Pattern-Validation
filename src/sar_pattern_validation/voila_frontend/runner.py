@@ -77,12 +77,20 @@ class SarPatternValidationRunner:
         try:
             payload = json.loads(result.stdout)
         except json.JSONDecodeError as error:
+            hint = (
+                "\nHint: set SAR_PATTERN_VALIDATION_BACKEND_MODE=local and "
+                "SAR_PATTERN_VALIDATION_LOCAL_PACKAGE_SOURCE=<repo-path> to avoid "
+                "remote git installation."
+                if "git" in result.stderr.lower() or "git" in result.stdout.lower()
+                else ""
+            )
             raise RuntimeError(
                 "sar-pattern-validation did not return valid JSON.\n"
                 f"Command: {' '.join(cmd)}\n"
                 f"Return code: {result.returncode}\n"
                 f"Stdout:\n{result.stdout}\n"
                 f"Stderr:\n{result.stderr}"
+                f"{hint}"
             ) from error
 
         if result.returncode != 0:
