@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import subprocess
+from datetime import datetime
 from pathlib import Path
 
 from .models import WorkflowResultPayload
@@ -44,15 +45,40 @@ class SarPatternValidationRunner:
     def __init__(self, paths: WorkspacePaths):
         self.paths = paths
 
+    def _has_local_project_checkout(self) -> bool:
+        project_root = self.paths.project_root
+        return (project_root / "pyproject.toml").exists() and (
+            project_root / "src" / "sar_pattern_validation"
+        ).exists()
+
+    def _should_default_to_local_checkout(self) -> bool:
+        return self.paths.workspace_root == self.paths.project_root / "notebooks"
+
+    def _backend_log_path(self) -> Path:
+        self.paths.system_state_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+        return self.paths.system_state_dir / f"backend-{timestamp}.log"
+
     def backend_source_spec(self) -> str:
-        mode = (
-            os.getenv("SAR_PATTERN_VALIDATION_BACKEND_MODE", "remote").strip().lower()
-        )
+        mode = os.getenv("SAR_PATTERN_VALIDATION_BACKEND_MODE", "").strip().lower()
         if mode == "local":
             return os.getenv(
                 "SAR_PATTERN_VALIDATION_LOCAL_PACKAGE_SOURCE",
                 str(self.paths.project_root),
             )
+        if mode == "remote":
+            package_url = os.getenv(
+                "GITHUB_PACKAGE_URL",
+                "https://github.com/ITISFoundation/SAR-Pattern-Validation",
+            )
+            branch = os.getenv("BRANCH", "main")
+            return f"git+{package_url}@{branch}"
+
+        if (
+            self._has_local_project_checkout()
+            and self._should_default_to_local_checkout()
+        ):
+            return str(self.paths.project_root)
 
         package_url = os.getenv(
             "GITHUB_PACKAGE_URL",
@@ -98,6 +124,9 @@ class SarPatternValidationRunner:
         env = os.environ.copy()
         env["MPLBACKEND"] = "agg"
         env["GIT_LFS_SKIP_SMUDGE"] = "1"
+        backend_log_path = self._backend_log_path()
+        env["SAR_PATTERN_VALIDATION_BACKEND_LOG_FILE"] = str(backend_log_path)
+        LOGGER.info("Backend log file: %s", backend_log_path)
         result = subprocess.run(cmd, capture_output=True, text=True, env=env)
         try:
             payload = json.loads(result.stdout)
@@ -105,13 +134,16 @@ class SarPatternValidationRunner:
             message = (
                 "Workflow backend returned an invalid response."
                 " Check backend logs for details."
+                f" Backend log: {backend_log_path}."
                 f"{_install_hint(result.stdout, result.stderr)}"
             )
             LOGGER.error(message)
             raise WorkflowExecutionError(message) from error
 
         if result.returncode != 0:
-            message = _extract_error_message(payload)
+            message = (
+                f"{_extract_error_message(payload)} Backend log: {backend_log_path}."
+            )
             LOGGER.error("Workflow backend failed: %s", message)
             raise WorkflowExecutionError(message)
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -9,6 +10,9 @@ from typing import Any
 from pydantic import BaseModel
 
 from sar_pattern_validation.workflows import complete_workflow
+
+_BACKEND_LOG_FILE_ENV = "SAR_PATTERN_VALIDATION_BACKEND_LOG_FILE"
+_LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 
 
 def _serialize(obj: Any) -> Any:
@@ -31,8 +35,27 @@ def _configure_logging() -> None:
     logging.basicConfig(
         level=logging.INFO,
         stream=sys.stderr,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        format=_LOG_FORMAT,
     )
+
+    log_path_value = os.getenv(_BACKEND_LOG_FILE_ENV, "").strip()
+    if not log_path_value:
+        return
+
+    log_path = Path(log_path_value)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    root_logger = logging.getLogger()
+    for handler in root_logger.handlers:
+        if (
+            isinstance(handler, logging.FileHandler)
+            and Path(handler.baseFilename) == log_path
+        ):
+            return
+
+    file_handler = logging.FileHandler(log_path, encoding="utf-8")
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(logging.Formatter(_LOG_FORMAT))
+    root_logger.addHandler(file_handler)
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -92,6 +92,14 @@ class WorkspacePaths(BaseModel):
             path.mkdir(parents=True, exist_ok=True)
 
     @classmethod
+    def from_repo_notebook_dir(cls, notebook_dir: Path) -> WorkspacePaths:
+        notebook_dir = notebook_dir.resolve()
+        return cls(
+            workspace_root=notebook_dir,
+            project_root=notebook_dir.parent,
+        )
+
+    @classmethod
     def from_workspace(
         cls,
         workspace_root: Path,
@@ -115,8 +123,38 @@ def ensure_notebook_prerequisites() -> None:
     os.environ["PATH"] += os.pathsep + os.path.expanduser("~/.local/bin")
 
 
+def _looks_like_project_root(path: Path) -> bool:
+    return (path / "src" / "sar_pattern_validation").exists() and (
+        path / "data" / "database"
+    ).exists()
+
+
+def _discover_workspace_paths(start_dir: Path) -> WorkspacePaths:
+    start_dir = start_dir.resolve()
+
+    if _looks_like_project_root(start_dir):
+        notebook_dir = start_dir / "notebooks"
+        workspace_root = notebook_dir if notebook_dir.exists() else start_dir
+        return WorkspacePaths(
+            workspace_root=workspace_root,
+            project_root=start_dir,
+        )
+
+    if start_dir.name == "notebooks" and _looks_like_project_root(start_dir.parent):
+        return WorkspacePaths.from_repo_notebook_dir(start_dir)
+
+    sibling_project_root = start_dir / "sar-pattern-validation"
+    if _looks_like_project_root(sibling_project_root):
+        return WorkspacePaths(
+            workspace_root=start_dir,
+            project_root=sibling_project_root,
+        )
+
+    return WorkspacePaths.from_workspace(start_dir)
+
+
 def default_workspace_paths() -> WorkspacePaths:
-    return WorkspacePaths.from_workspace(Path.cwd().resolve())
+    return _discover_workspace_paths(Path.cwd())
 
 
 def extend_notebook_sys_path(paths: WorkspacePaths) -> None:
