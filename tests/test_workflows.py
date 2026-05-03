@@ -9,14 +9,27 @@ import SimpleITK as sitk
 matplotlib.use("Agg")
 
 import sar_pattern_validation.workflows as workflows_module
-from sar_pattern_validation.errors import ConfigValidationError
+from sar_pattern_validation.errors import (
+    ConfigValidationError,
+    CsvFormatError,
+    WorkflowExecutionError,
+)
 from sar_pattern_validation.gamma_eval import GammaMapEvaluator
 from sar_pattern_validation.image_loader import SARImageLoader
 from sar_pattern_validation.registration2d import Rigid2DRegistration, Transform2D
 from sar_pattern_validation.workflow_config import PlottingConfig
 from sar_pattern_validation.workflow_schema import validate_workflow_config
 from sar_pattern_validation.workflows import (
+    CSV_FORMAT_INVALID,
+    MASK_TOO_SMALL,
+    MEASUREMENT_AREA_OUT_OF_BOUNDS,
+    META_JSON_INVALID,
+    NOISE_FLOOR_OUT_OF_BOUNDS,
+    ValidationIssue,
+    WorkflowValidationError,
     _apply_roi_policy,
+    _csv_format_issue_from_error,
+    _measurement_area_issue_from_config_error,
     _select_registration_mask,
     complete_workflow,
 )
@@ -523,3 +536,113 @@ def test_complete_workflow_roi_policies_change_evaluated_region_consistently(
     assert (
         intersection_result.pass_rate_percent >= reference_only_result.pass_rate_percent
     )
+
+
+# ---------------------------------------------------------------------------
+# ValidationIssue tests (Task 6.6)
+# ---------------------------------------------------------------------------
+
+
+def test_validation_issue_is_frozen_dataclass() -> None:
+    issue = ValidationIssue(
+        severity="error", code=CSV_FORMAT_INVALID, message="bad csv"
+    )
+    with pytest.raises((AttributeError, Exception)):
+        issue.code = "OTHER"  # type: ignore[misc]
+
+
+def test_validation_issue_to_dict_round_trip() -> None:
+    issue = ValidationIssue(
+        severity="warning",
+        code=MEASUREMENT_AREA_OUT_OF_BOUNDS,
+        message="x_mm out of range",
+        details={"x_mm": 800.0},
+    )
+    payload = issue.to_dict()
+    assert payload["severity"] == "warning"
+    assert payload["code"] == MEASUREMENT_AREA_OUT_OF_BOUNDS
+    assert payload["message"] == "x_mm out of range"
+    assert payload["details"] == {"x_mm": 800.0}
+
+
+def test_validation_issue_codes_are_stable_strings() -> None:
+    assert CSV_FORMAT_INVALID == "CSV_FORMAT_INVALID"
+    assert MEASUREMENT_AREA_OUT_OF_BOUNDS == "MEASUREMENT_AREA_OUT_OF_BOUNDS"
+    assert MASK_TOO_SMALL == "MASK_TOO_SMALL"
+    assert NOISE_FLOOR_OUT_OF_BOUNDS == "NOISE_FLOOR_OUT_OF_BOUNDS"
+    assert META_JSON_INVALID == "META_JSON_INVALID"
+
+
+def test_csv_format_issue_translation_preserves_original_text() -> None:
+    err = CsvFormatError("No recognizable x/y coordinate columns in: foo.csv")
+    issue = _csv_format_issue_from_error(err)
+    assert issue.code == CSV_FORMAT_INVALID
+    assert issue.severity == "error"
+    assert "No recognizable x/y coordinate columns" in issue.message
+
+
+def test_measurement_area_issue_translation_returns_issue_for_x_mm_error() -> None:
+    err = ConfigValidationError(
+        "1 validation error for WorkflowConfig\nmeasurement_area_x_mm\n  Input should be less than or equal to 600"
+    )
+    issue = _measurement_area_issue_from_config_error(err)
+    assert issue is not None
+    assert issue.code == MEASUREMENT_AREA_OUT_OF_BOUNDS
+    assert issue.severity == "error"
+    assert "Measurement area is out of bounds" in issue.message
+
+
+def test_measurement_area_issue_translation_returns_none_for_other_field() -> None:
+    err = ConfigValidationError(
+        "1 validation error for WorkflowConfig\nlog_level\n  must be one of"
+    )
+    assert _measurement_area_issue_from_config_error(err) is None
+
+
+def test_complete_workflow_translates_measurement_area_to_validation_error() -> None:
+    project_root = Path(__file__).resolve().parents[1]
+    measured_csv = project_root / "data/example/measured_sSAR1g.csv"
+    reference_csv = project_root / "data/example/reference_sSAR1g.csv"
+
+    with pytest.raises(WorkflowValidationError) as exc_info:
+        complete_workflow(
+            measured_file_path=str(measured_csv),
+            reference_file_path=str(reference_csv),
+            measurement_area_x_mm=22.0,  # at exclusive lower bound — invalid
+            measurement_area_y_mm=100.0,
+        )
+
+    assert exc_info.value.issue.code == MEASUREMENT_AREA_OUT_OF_BOUNDS
+    assert exc_info.value.issue.severity == "error"
+
+
+def test_complete_workflow_translates_csv_format_error_to_validation_error(
+    tmp_path: Path,
+) -> None:
+    bad_csv = tmp_path / "bad.csv"
+    good_csv = tmp_path / "good.csv"
+    bad_csv.write_text("a,b,c\n1,2,3\n", encoding="utf-8")
+    good_csv.write_text("x,y,sar\n0,0,1\n", encoding="utf-8")
+
+    with pytest.raises(WorkflowValidationError) as exc_info:
+        complete_workflow(
+            measured_file_path=str(bad_csv),
+            reference_file_path=str(good_csv),
+            render_plots=False,
+            log_level="WARNING",
+        )
+
+    assert exc_info.value.issue.code == CSV_FORMAT_INVALID
+    assert isinstance(exc_info.value, WorkflowExecutionError)
+
+
+def test_complete_workflow_non_validation_error_preserves_workflow_execution_error() -> (
+    None
+):
+    with pytest.raises(WorkflowExecutionError) as exc_info:
+        complete_workflow(
+            measured_file_path="does/not/exist.csv",
+            reference_file_path="also/missing.csv",
+        )
+    # Generic missing-input error should NOT carry a ValidationIssue
+    assert not isinstance(exc_info.value, WorkflowValidationError)

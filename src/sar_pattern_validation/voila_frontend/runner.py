@@ -19,6 +19,10 @@ LOGGER = logging.getLogger(__name__)
 class WorkflowExecutionError(RuntimeError):
     """Frontend-safe workflow execution failure."""
 
+    def __init__(self, message: str, *, validation_issue: dict | None = None) -> None:
+        super().__init__(message)
+        self.validation_issue = validation_issue
+
 
 def _install_hint(stdout: str, stderr: str) -> str:
     combined_output = f"{stdout}\n{stderr}".lower()
@@ -42,6 +46,18 @@ def _extract_error_message(payload: object) -> str:
             return message
 
     return "Workflow execution failed. Check backend logs for details."
+
+
+def _extract_validation_issue(payload: object) -> dict | None:
+    if not isinstance(payload, dict):
+        return None
+    error = payload.get("error")
+    if not isinstance(error, dict):
+        return None
+    issue = error.get("validation_issue")
+    if isinstance(issue, dict):
+        return issue
+    return None
 
 
 def _log_backend_stderr(stderr: str) -> None:
@@ -224,6 +240,14 @@ class SarPatternValidationRunner:
 
         if process.returncode != 0:
             _log_backend_stderr(stderr)
+            issue = _extract_validation_issue(payload)
+            if issue is not None:
+                base_message = str(issue.get("message") or "").strip()
+                message = (
+                    base_message or _extract_error_message(payload)
+                ) + f" Backend log: {backend_log_path}."
+                LOGGER.error("Workflow backend validation issue: %s", message)
+                raise WorkflowExecutionError(message, validation_issue=issue)
             message = (
                 f"{_extract_error_message(payload)} Backend log: {backend_log_path}."
             )

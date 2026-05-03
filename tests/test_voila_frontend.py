@@ -20,7 +20,10 @@ from sar_pattern_validation.sample_catalog import (
     DatabaseSampleFilters,
 )
 from sar_pattern_validation.voila_frontend.models import UiState, WorkflowResultPayload
-from sar_pattern_validation.voila_frontend.runner import SarPatternValidationRunner
+from sar_pattern_validation.voila_frontend.runner import (
+    SarPatternValidationRunner,
+    WorkflowExecutionError,
+)
 from sar_pattern_validation.voila_frontend.runtime import WorkspacePaths
 from sar_pattern_validation.voila_frontend.state import (
     load_or_migrate_ui_state,
@@ -1481,3 +1484,116 @@ def _restore_env(name: str, value: str | None) -> None:
         os.environ.pop(name, None)
     else:
         os.environ[name] = value
+
+
+# ---------------------------------------------------------------------------
+# ValidationIssue surfacing tests (Task 6.6)
+# ---------------------------------------------------------------------------
+
+
+def _run_button_with_validation_issue(
+    sar_ui: SarGammaComparisonUI,
+    *,
+    reference_path: Path,
+    issue: dict,
+) -> None:
+    sar_ui.paths.measured_file_path.parent.mkdir(parents=True, exist_ok=True)
+    sar_ui.paths.measured_file_path.write_text("x,y,sar\n0,0,1\n", encoding="utf-8")
+    error = WorkflowExecutionError(issue["message"], validation_issue=issue)
+
+    with (
+        patch.object(sar_ui, "_start_progress_updater"),
+        patch.object(sar_ui, "_start_stall_watchdog"),
+        patch.object(sar_ui, "_stop_progress_updater"),
+        patch(
+            "sar_pattern_validation.voila_frontend.ui.threading.Thread",
+            _ImmediateThread,
+        ),
+        patch.object(
+            type(sar_ui.radio_button_grid),
+            "selected_reference_path",
+            new_callable=PropertyMock,
+            return_value=reference_path,
+        ),
+        patch.object(sar_ui.runner, "run_workflow", side_effect=error),
+    ):
+        sar_ui.handle_button_click(sar_ui.run_button)
+
+
+def test_handle_button_click_surfaces_measurement_area_validation_issue(
+    sar_ui: SarGammaComparisonUI, tmp_path: Path
+) -> None:
+    issue = {
+        "severity": "error",
+        "code": "MEASUREMENT_AREA_OUT_OF_BOUNDS",
+        "message": "Measurement area is out of bounds. x must satisfy 22 mm < x <= 600 mm.",
+        "details": None,
+    }
+    _run_button_with_validation_issue(
+        sar_ui,
+        reference_path=tmp_path / "reference.csv",
+        issue=issue,
+    )
+
+    assert "MEASUREMENT_AREA_OUT_OF_BOUNDS" in sar_ui.feedback_banner.value
+    assert "Measurement area is out of bounds" in sar_ui.feedback_banner.value
+    assert sar_ui.run_button.disabled is False
+
+
+def test_handle_button_click_surfaces_csv_format_validation_issue(
+    sar_ui: SarGammaComparisonUI, tmp_path: Path
+) -> None:
+    issue = {
+        "severity": "error",
+        "code": "CSV_FORMAT_INVALID",
+        "message": "CSV format invalid: No recognizable x/y coordinate columns in: meas.csv",
+        "details": None,
+    }
+    _run_button_with_validation_issue(
+        sar_ui,
+        reference_path=tmp_path / "reference.csv",
+        issue=issue,
+    )
+
+    assert "CSV_FORMAT_INVALID" in sar_ui.feedback_banner.value
+    assert "No recognizable x/y coordinate columns" in sar_ui.feedback_banner.value
+    assert sar_ui.run_button.disabled is False
+
+
+def test_runner_extracts_validation_issue_from_error_payload(
+    workspace_with_database: WorkspacePaths,
+) -> None:
+    runner = SarPatternValidationRunner(workspace_with_database)
+    failed_run = _FakePopen(
+        returncode=1,
+        stdout=json.dumps(
+            {
+                "status": "error",
+                "error": {
+                    "type": "WorkflowValidationError",
+                    "message": "CSV format invalid: bad header",
+                    "validation_issue": {
+                        "severity": "error",
+                        "code": "CSV_FORMAT_INVALID",
+                        "message": "CSV format invalid: bad header",
+                        "details": None,
+                    },
+                },
+            }
+        ),
+    )
+
+    with (
+        patch(
+            "sar_pattern_validation.voila_frontend.runner.subprocess.Popen",
+            return_value=failed_run,
+        ),
+        pytest.raises(WorkflowExecutionError) as exc_info,
+    ):
+        runner.run_workflow(
+            reference_file_path=Path("reference.csv"),
+            power_level_dbm=23.0,
+        )
+
+    assert exc_info.value.validation_issue is not None
+    assert exc_info.value.validation_issue["code"] == "CSV_FORMAT_INVALID"

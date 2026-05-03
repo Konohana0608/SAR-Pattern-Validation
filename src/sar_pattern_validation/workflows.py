@@ -2,14 +2,19 @@ from __future__ import annotations
 
 import argparse
 import logging
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Final, Literal
 
 import numpy as np
 import SimpleITK as sitk
 from pydantic import BaseModel
 
-from sar_pattern_validation.errors import WorkflowExecutionError
+from sar_pattern_validation.errors import (
+    ConfigValidationError,
+    CsvFormatError,
+    WorkflowExecutionError,
+)
 from sar_pattern_validation.gamma_eval import GammaMapEvaluator
 from sar_pattern_validation.image_loader import SARImageLoader
 from sar_pattern_validation.plotting import show_registration_overlay
@@ -29,6 +34,9 @@ from sar_pattern_validation.workflow_config import (
     DEFAULT_REFERENCE_FILE_PATH,
     DEFAULT_REGISTRATION_STAGE_POLICY,
     DEFAULT_RENDER_PLOTS,
+    MEASUREMENT_AREA_MAX_X_MM,
+    MEASUREMENT_AREA_MAX_Y_MM,
+    MEASUREMENT_AREA_MIN_MM_EXCLUSIVE,
     ROI_POLICY_CHOICES,
     PlottingConfig,
     WorkflowConfig,
@@ -38,6 +46,67 @@ from sar_pattern_validation.workflow_schema import (
     ensure_input_files_exist,
     validate_workflow_config,
 )
+
+CSV_FORMAT_INVALID: Final[str] = "CSV_FORMAT_INVALID"
+MEASUREMENT_AREA_OUT_OF_BOUNDS: Final[str] = "MEASUREMENT_AREA_OUT_OF_BOUNDS"
+MASK_TOO_SMALL: Final[str] = "MASK_TOO_SMALL"
+NOISE_FLOOR_OUT_OF_BOUNDS: Final[str] = "NOISE_FLOOR_OUT_OF_BOUNDS"
+META_JSON_INVALID: Final[str] = "META_JSON_INVALID"
+
+
+@dataclass(frozen=True)
+class ValidationIssue:
+    severity: Literal["warning", "error"]
+    code: str
+    message: str
+    details: dict[str, Any] | None = field(default=None)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "severity": self.severity,
+            "code": self.code,
+            "message": self.message,
+            "details": self.details,
+        }
+
+
+def _measurement_area_issue_from_config_error(
+    error: ConfigValidationError,
+) -> ValidationIssue | None:
+    text = str(error)
+    if "measurement_area_x_mm" not in text and "measurement_area_y_mm" not in text:
+        return None
+    message = (
+        "Measurement area is out of bounds. "
+        f"x must satisfy {MEASUREMENT_AREA_MIN_MM_EXCLUSIVE:g} mm "
+        f"< x <= {MEASUREMENT_AREA_MAX_X_MM:g} mm, "
+        f"y must satisfy {MEASUREMENT_AREA_MIN_MM_EXCLUSIVE:g} mm "
+        f"< y <= {MEASUREMENT_AREA_MAX_Y_MM:g} mm, "
+        "and both must be provided together."
+    )
+    return ValidationIssue(
+        severity="error",
+        code=MEASUREMENT_AREA_OUT_OF_BOUNDS,
+        message=message,
+        details={"pydantic_error": text},
+    )
+
+
+def _csv_format_issue_from_error(error: CsvFormatError) -> ValidationIssue:
+    raw = str(error).strip() or "CSV could not be parsed."
+    return ValidationIssue(
+        severity="error",
+        code=CSV_FORMAT_INVALID,
+        message=f"CSV format invalid: {raw}",
+        details=None,
+    )
+
+
+class WorkflowValidationError(WorkflowExecutionError):
+    def __init__(self, issue: ValidationIssue) -> None:
+        super().__init__(issue.message)
+        self.issue = issue
+
 
 LOGGER = logging.getLogger(__name__)
 
@@ -299,6 +368,15 @@ def _complete_workflow(config: WorkflowConfig) -> WorkflowResult:
             gamma_map=gamma_map,
             evaluation_mask=evaluation_mask,
         )
+    except CsvFormatError as exc:
+        # TODO(Task 6.7): emit ValidationIssue(code=META_JSON_INVALID, ...)
+        # when *.meta.json sidecar parsing lands.
+        raise WorkflowValidationError(_csv_format_issue_from_error(exc)) from exc
+    # TODO(Task 6.5): emit ValidationIssue(code=MASK_TOO_SMALL, ...) when the
+    # registration-mask sufficiency check is upgraded to surface a structured
+    # issue instead of falling back silently to the support mask.
+    # TODO(Task 6.3): emit ValidationIssue(code=NOISE_FLOOR_OUT_OF_BOUNDS, ...)
+    # once noise-floor validation lands.
     except Exception as exc:
         raise WorkflowExecutionError(f"Workflow failed: {exc}") from exc
 
@@ -478,7 +556,13 @@ def complete_workflow(*args, **kwargs) -> WorkflowResult:
 
     raw_config = _normalize_plotting_config(raw_config)
 
-    config = validate_workflow_config(raw_config)
+    try:
+        config = validate_workflow_config(raw_config)
+    except ConfigValidationError as exc:
+        issue = _measurement_area_issue_from_config_error(exc)
+        if issue is not None:
+            raise WorkflowValidationError(issue) from exc
+        raise
 
     configure_root_logging(config.log_level)
 

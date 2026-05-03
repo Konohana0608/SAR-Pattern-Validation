@@ -87,12 +87,17 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as exc:
         logging.getLogger(__name__).exception("Workflow execution failed")
 
+        error_body: dict[str, Any] = {
+            "type": type(exc).__name__,
+            "message": str(exc).strip() or "Workflow execution failed.",
+        }
+        issue = getattr(exc, "issue", None)
+        if issue is not None and hasattr(issue, "to_dict"):
+            error_body["validation_issue"] = issue.to_dict()
+
         error_payload = {
             "status": "error",
-            "error": {
-                "type": type(exc).__name__,
-                "message": str(exc).strip() or "Workflow execution failed.",
-            },
+            "error": error_body,
         }
 
         # Print error JSON to stdout (not stderr) so frontend can always parse stdout

@@ -650,12 +650,14 @@ class SarGammaComparisonUI:
                 run_id=run_id,
             )
         except Exception as error:  # noqa: BLE001
+            issue = getattr(error, "validation_issue", None)
             message = str(error).strip() or "Workflow execution failed."
             self._dispatch_ui_update(
                 self._handle_workflow_failure,
                 message=message,
                 button=button,
                 run_id=run_id,
+                validation_issue=issue,
             )
         finally:
             self._dispatch_ui_update(
@@ -698,16 +700,32 @@ class SarGammaComparisonUI:
         )
 
     def _handle_workflow_failure(
-        self, *, message: str, button: widgets.Button | None, run_id: int | None
+        self,
+        *,
+        message: str,
+        button: widgets.Button | None,
+        run_id: int | None,
+        validation_issue: dict | None = None,
     ) -> None:
         if run_id is not None and run_id != self._active_run_id:
             self.logger.info("Discarded stale workflow failure for run %s.", run_id)
             return
-        message = _normalize_failure_message(message)
+        if validation_issue is not None:
+            issue_message = str(validation_issue.get("message") or "").strip()
+            issue_code = str(validation_issue.get("code") or "").strip()
+            severity = str(validation_issue.get("severity") or "error").strip().lower()
+            if severity not in ("error", "warning", "info"):
+                severity = "error"
+            display_message = issue_message or _normalize_failure_message(message)
+            if issue_code:
+                display_message = f"[{issue_code}] {display_message}"
+        else:
+            display_message = _normalize_failure_message(message)
+            severity = "error"
         self.workflow_results = None
         self._stop_progress_updater(completed=False)
-        self._set_feedback_banner(message, severity="error")
-        self.logger.error(message)
+        self._set_feedback_banner(display_message, severity=severity)
+        self.logger.error(display_message)
         self._persist_state()
         if button is not None:
             button.style = {

@@ -39,6 +39,27 @@ def _pass_rate_class(pass_rate: float | None) -> str:
     return "bad"
 
 
+def _format_validation_issues_html(case: dict[str, Any]) -> str:
+    issues = case.get("validation_issues") or []
+    if not isinstance(issues, list) or not issues:
+        return ""
+    parts: list[str] = ["<ul class='issues'>"]
+    for issue in issues:
+        if not isinstance(issue, dict):
+            continue
+        severity = str(issue.get("severity") or "error").lower()
+        if severity not in ("error", "warning", "info"):
+            severity = "error"
+        code = _escape_html(str(issue.get("code") or "")).strip()
+        message = _escape_html(str(issue.get("message") or "")).strip()
+        label = code or severity.upper()
+        parts.append(
+            f"<li class='issue {severity}'><span class='issue-code'>{label}</span> {message}</li>"
+        )
+    parts.append("</ul>")
+    return "".join(parts)
+
+
 def _format_dbm_label(value: Any) -> str:
     try:
         numeric = float(value)
@@ -207,6 +228,12 @@ def _generate_html(reports: list[dict[str, Any]], cases: list[dict[str, Any]]) -
         .badge.error { background: #fef3c7; color: #92400e; }
         .small { font-size: 12px; color: #334155; }
         .hide { display: none; }
+        ul.issues { list-style: none; margin: 4px 0 0 0; padding: 0; }
+        ul.issues li.issue { font-size: 12px; padding: 4px 8px; border-radius: 6px; margin-top: 4px; border-left: 3px solid #cbd5e1; }
+        ul.issues li.issue.error { background: #fef2f2; border-left-color: #b91c1c; color: #7f1d1d; }
+        ul.issues li.issue.warning { background: #fffbeb; border-left-color: #b45309; color: #78350f; }
+        ul.issues li.issue.info { background: #eff6ff; border-left-color: #2563eb; color: #1e3a8a; }
+        ul.issues .issue-code { font-weight: 700; margin-right: 6px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
         @media (max-width: 900px) { .small-col { display: none; } }
         """
     )
@@ -299,12 +326,16 @@ def _generate_html(reports: list[dict[str, Any]], cases: list[dict[str, Any]]) -
             failed_pixels = int(case.get("failed_pixel_count", 0))
             evaluated = int(case.get("evaluated_pixel_count", 0))
 
+            issues_html = _format_validation_issues_html(case)
+            case_id_cell = f"<code>{_escape_html(str(case.get('case_id', '')))}</code>"
+            if issues_html:
+                case_id_cell = f"{case_id_cell}{issues_html}"
             parts.append(
                 "<tr "
                 f"data-frequency='{freq_key}' "
                 f"data-dbm='{_escape_html(_format_dbm_label(case.get('power_level_dbm', 'N/A')))}' "
                 f"data-status='{_escape_html(status)}'>"
-                f"<td><code>{_escape_html(str(case.get('case_id', '')))}</code></td>"
+                f"<td>{case_id_cell}</td>"
                 f"<td><span class='badge {status_class}'>{_escape_html(status)}</span></td>"
                 f"<td>{_escape_html(_format_dbm_label(case.get('power_level_dbm', 'N/A')))}</td>"
                 f"<td>{_escape_html(str(case.get('distance_mm', 'N/A')))} mm</td>"
