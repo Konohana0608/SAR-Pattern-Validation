@@ -27,7 +27,9 @@ FILTER_ATTR_BY_COLUMN = {
 def save_ui_state(paths: WorkspacePaths, state: UiState) -> None:
     paths.system_state_dir.mkdir(parents=True, exist_ok=True)
     payload = state.model_copy(update={"updated_at_epoch_s": time.time()})
-    paths.ui_state_path.write_text(payload.model_dump_json(indent=2), encoding="utf-8")
+    temp_path = paths.ui_state_path.with_suffix(".tmp")
+    temp_path.write_text(payload.model_dump_json(indent=2), encoding="utf-8")
+    temp_path.replace(paths.ui_state_path)
 
 
 def load_ui_state(paths: WorkspacePaths) -> UiState | None:
@@ -37,10 +39,19 @@ def load_ui_state(paths: WorkspacePaths) -> UiState | None:
         return UiState.model_validate_json(
             paths.ui_state_path.read_text(encoding="utf-8")
         )
-    except (ValidationError, json.JSONDecodeError):
+    except json.JSONDecodeError as error:
         logging.getLogger(__name__).warning(
-            "Saved UI state is invalid or stale — starting fresh."
+            "Saved UI state at %s is not valid JSON — starting fresh.",
+            paths.ui_state_path,
         )
+        logging.getLogger(__name__).debug("UI state JSON decode error", exc_info=error)
+        return None
+    except ValidationError as error:
+        logging.getLogger(__name__).warning(
+            "Saved UI state at %s failed validation — starting fresh.",
+            paths.ui_state_path,
+        )
+        logging.getLogger(__name__).debug("UI state validation error", exc_info=error)
         return None
 
 

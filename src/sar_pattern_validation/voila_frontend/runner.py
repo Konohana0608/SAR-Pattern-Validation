@@ -41,6 +41,13 @@ def _extract_error_message(payload: object) -> str:
     return "Workflow execution failed. Check backend logs for details."
 
 
+def _log_backend_stderr(stderr: str) -> None:
+    for line in stderr.splitlines():
+        line = line.strip()
+        if line:
+            LOGGER.debug(line)
+
+
 class SarPatternValidationRunner:
     def __init__(self, paths: WorkspacePaths):
         self.paths = paths
@@ -126,7 +133,14 @@ class SarPatternValidationRunner:
         env["GIT_LFS_SKIP_SMUDGE"] = "1"
         backend_log_path = self._backend_log_path()
         env["SAR_PATTERN_VALIDATION_BACKEND_LOG_FILE"] = str(backend_log_path)
+        LOGGER.info(
+            "Starting comparison: measured=%s reference=%s power_level_dbm=%.1f",
+            self.paths.measured_file_path,
+            reference_file_path,
+            power_level_dbm,
+        )
         LOGGER.info("Backend log file: %s", backend_log_path)
+        LOGGER.debug("Backend source spec: %s", self.backend_source_spec())
         result = subprocess.run(cmd, capture_output=True, text=True, env=env)
         try:
             payload = json.loads(result.stdout)
@@ -141,14 +155,14 @@ class SarPatternValidationRunner:
             raise WorkflowExecutionError(message) from error
 
         if result.returncode != 0:
+            _log_backend_stderr(result.stderr)
             message = (
                 f"{_extract_error_message(payload)} Backend log: {backend_log_path}."
             )
             LOGGER.error("Workflow backend failed: %s", message)
             raise WorkflowExecutionError(message)
 
-        for line in result.stderr.splitlines():
-            if line.strip():
-                LOGGER.info(line)
+        _log_backend_stderr(result.stderr)
+        LOGGER.info("Comparison completed successfully.")
 
         return WorkflowResultPayload.model_validate(payload["result"])

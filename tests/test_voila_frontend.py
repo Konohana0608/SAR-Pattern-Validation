@@ -86,6 +86,34 @@ class _ImmediateThread:
         if self._target is not None:
             self._target(*self._args, **self._kwargs)
 
+    def is_alive(self) -> bool:
+        return False
+
+
+class _DeferredThread:
+    started = False
+
+    def __init__(self, target=None, args=(), kwargs=None, daemon=None):
+        self._target = target
+        self._args = args
+        self._kwargs = kwargs or {}
+        self.daemon = daemon
+
+    def start(self):
+        type(self).started = True
+
+    def is_alive(self) -> bool:
+        return True
+
+
+class _ImmediateIOLoop:
+    def __init__(self):
+        self.calls: list[tuple[float, object, tuple[object, ...]]] = []
+
+    def call_later(self, delay, callback, *args):
+        self.calls.append((delay, callback, args))
+        callback(*args)
+
 
 def test_default_workspace_paths_uses_notebooks_dir_for_repo_checkout(
     tmp_path: Path,
@@ -643,6 +671,11 @@ class TestSarGammaComparisonUI:
         assert sar_ui.uploaded_file_name_label.value == "restored.csv"
         assert sar_ui.power_level.value == 12.0
 
+    def test_power_level_widget_syncs_continuously(
+        self, sar_ui: SarGammaComparisonUI
+    ) -> None:
+        assert sar_ui.power_level.continuous_update is True
+
     def test_restore_state_with_no_state_file_does_not_crash(
         self, sar_ui: SarGammaComparisonUI
     ) -> None:
@@ -678,6 +711,168 @@ class TestSarGammaComparisonUI:
 
         assert "Measured CSV could not be parsed." in sar_ui.feedback_banner.value
         assert "Traceback" not in sar_ui.feedback_banner.value
+
+    def test_handle_button_click_clears_prior_results_before_rerun(
+        self, sar_ui: SarGammaComparisonUI, tmp_path: Path
+    ) -> None:
+        sar_ui.paths.measured_file_path.parent.mkdir(parents=True, exist_ok=True)
+        sar_ui.paths.measured_file_path.write_text("x,y,sar\n0,0,1\n", encoding="utf-8")
+        sar_ui.workflow_results = _make_result(pass_rate_percent=88.0)
+        sar_ui.results_display.value = "<div>Old Results</div>"
+
+        for attr_name in (
+            "reference_image_path",
+            "measured_image_path",
+            "aligned_means_path",
+            "aligned_means_colorbar_path",
+            "registered_image_path",
+            "gamma_comparison_path",
+            "gamma_comparison_colorbar_path",
+            "gamma_comparison_failures_path",
+        ):
+            _write_png(getattr(sar_ui.paths, attr_name))
+
+        def _assert_cleared_then_return(
+            *, reference_file_path: Path, power_level_dbm: float
+        ):
+            assert sar_ui.workflow_results is None
+            assert sar_ui.results_display.value == ""
+            return _make_result(pass_rate_percent=91.0)
+
+        with (
+            patch.object(sar_ui, "_start_progress_updater"),
+            patch.object(sar_ui, "_stop_progress_updater"),
+            patch(
+                "sar_pattern_validation.voila_frontend.ui.threading.Thread",
+                _ImmediateThread,
+            ),
+            patch.object(
+                type(sar_ui.radio_button_grid),
+                "selected_reference_path",
+                new_callable=PropertyMock,
+                return_value=tmp_path / "reference.csv",
+            ),
+            patch.object(
+                sar_ui.runner,
+                "run_workflow",
+                side_effect=_assert_cleared_then_return,
+            ),
+            patch.object(sar_ui, "_persist_state"),
+        ):
+            sar_ui.handle_button_click(sar_ui.run_button)
+
+        assert "Old Results" not in sar_ui.results_display.value
+        assert "91.0" in sar_ui.results_display.value
+        assert (
+            sar_ui.image_top_left.value
+            == sar_ui.paths.reference_image_path.read_bytes()
+        )
+
+    def test_handle_button_click_persists_cleared_state_before_rerun(
+        self, sar_ui: SarGammaComparisonUI, tmp_path: Path
+    ) -> None:
+        sar_ui.paths.measured_file_path.parent.mkdir(parents=True, exist_ok=True)
+        sar_ui.paths.measured_file_path.write_text("x,y,sar\n0,0,1\n", encoding="utf-8")
+        sar_ui.workflow_results = _make_result(pass_rate_percent=88.0)
+        sar_ui.results_display.value = "<div>Old Results</div>"
+
+        persisted_results: list[WorkflowResultPayload | None] = []
+
+        def _capture_persisted_state() -> None:
+            persisted_results.append(sar_ui._build_state().last_result)
+
+        with (
+            patch.object(sar_ui, "_start_progress_updater"),
+            patch.object(sar_ui, "_stop_progress_updater"),
+            patch(
+                "sar_pattern_validation.voila_frontend.ui.threading.Thread",
+                _ImmediateThread,
+            ),
+            patch.object(
+                type(sar_ui.radio_button_grid),
+                "selected_reference_path",
+                new_callable=PropertyMock,
+                return_value=tmp_path / "reference.csv",
+            ),
+            patch.object(
+                sar_ui.runner,
+                "run_workflow",
+                return_value=_make_result(pass_rate_percent=91.0),
+            ),
+            patch.object(sar_ui, "_persist_state", side_effect=_capture_persisted_state),
+        ):
+            sar_ui.handle_button_click(sar_ui.run_button)
+
+        assert len(persisted_results) >= 2
+        assert persisted_results[0] is None
+        assert persisted_results[-1] is not None
+        assert persisted_results[-1].pass_rate_percent == 91.0
+
+    def test_handle_button_click_starts_background_workflow_thread(
+        self, sar_ui: SarGammaComparisonUI, tmp_path: Path
+    ) -> None:
+        sar_ui.paths.measured_file_path.parent.mkdir(parents=True, exist_ok=True)
+        sar_ui.paths.measured_file_path.write_text("x,y,sar\n0,0,1\n", encoding="utf-8")
+        _DeferredThread.started = False
+
+        with (
+            patch.object(sar_ui, "_start_progress_updater"),
+            patch(
+                "sar_pattern_validation.voila_frontend.ui.threading.Thread",
+                _DeferredThread,
+            ),
+            patch.object(
+                type(sar_ui.radio_button_grid),
+                "selected_reference_path",
+                new_callable=PropertyMock,
+                return_value=tmp_path / "reference.csv",
+            ),
+            patch.object(sar_ui.runner, "run_workflow") as run_workflow,
+        ):
+            sar_ui.handle_button_click(sar_ui.run_button)
+
+        run_workflow.assert_not_called()
+        assert _DeferredThread.started is True
+        assert sar_ui.run_button.disabled is True
+
+    def test_handle_button_click_defers_start_until_kernel_io_loop_turn(
+        self, sar_ui: SarGammaComparisonUI, tmp_path: Path
+    ) -> None:
+        sar_ui.paths.measured_file_path.parent.mkdir(parents=True, exist_ok=True)
+        sar_ui.paths.measured_file_path.write_text("x,y,sar\n0,0,1\n", encoding="utf-8")
+        _DeferredThread.started = False
+        io_loop = _ImmediateIOLoop()
+        fake_ipython = type(
+            "FakeIPython",
+            (),
+            {"kernel": type("FakeKernel", (), {"io_loop": io_loop})()},
+        )()
+
+        with (
+            patch.object(sar_ui, "_start_progress_updater"),
+            patch(
+                "sar_pattern_validation.voila_frontend.ui.threading.Thread",
+                _DeferredThread,
+            ),
+            patch(
+                "sar_pattern_validation.voila_frontend.ui.get_ipython",
+                return_value=fake_ipython,
+            ),
+            patch.object(
+                type(sar_ui.radio_button_grid),
+                "selected_reference_path",
+                new_callable=PropertyMock,
+                return_value=tmp_path / "reference.csv",
+            ),
+            patch.object(sar_ui.runner, "run_workflow") as run_workflow,
+        ):
+            sar_ui.handle_button_click(sar_ui.run_button)
+
+        run_workflow.assert_not_called()
+        assert len(io_loop.calls) == 1
+        delay, _, _ = io_loop.calls[0]
+        assert delay == pytest.approx(0.2)
+        assert _DeferredThread.started is True
 
 
 # ---------------------------------------------------------------------------

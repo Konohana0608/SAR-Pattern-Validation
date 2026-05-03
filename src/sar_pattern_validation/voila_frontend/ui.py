@@ -11,6 +11,7 @@ from pathlib import Path
 
 import ipywidgets as widgets
 import pandas as pd
+from IPython import get_ipython
 from IPython.display import display
 from PIL import Image
 from traitlets import Bunch
@@ -292,9 +293,13 @@ class SarGammaComparisonUI:
 
     def _refresh_run_button_state(self) -> None:
         self.run_button.disabled = not (
-            self.paths.measured_file_path.exists()
+            not self._is_workflow_running()
+            and self.paths.measured_file_path.exists()
             and self.radio_button_grid.selected_reference_path is not None
         )
+
+    def _is_workflow_running(self) -> bool:
+        return self._workflow_thread is not None and self._workflow_thread.is_alive()
 
     def _set_feedback_banner(self, message: str, *, severity: str) -> None:
         palette = {
@@ -312,6 +317,40 @@ class SarGammaComparisonUI:
 
     def _clear_feedback_banner(self) -> None:
         self.feedback_banner.value = ""
+
+    def _prepare_for_new_run(self) -> None:
+        self.workflow_results = None
+        self.results_display.value = ""
+        self._clear_feedback_banner()
+        self.update_images(no_data=True)
+        self._persist_state()
+
+    def _dispatch_ui_update(self, callback: Callable[..., None], /, *args, **kwargs) -> None:
+        ipython = get_ipython()
+        kernel = getattr(ipython, "kernel", None)
+        io_loop = getattr(kernel, "io_loop", None)
+
+        if io_loop is None or threading.current_thread() is threading.main_thread():
+            callback(*args, **kwargs)
+            return
+
+        finished = threading.Event()
+        errors: list[Exception] = []
+
+        def run_callback() -> None:
+            try:
+                callback(*args, **kwargs)
+            except Exception as error:  # noqa: BLE001
+                errors.append(error)
+            finally:
+                finished.set()
+
+        io_loop.add_callback(run_callback)
+        if not finished.wait(timeout=10.0):
+            self.logger.warning("Timed out while waiting for a UI update callback.")
+            return
+        if errors:
+            raise errors[0]
 
     def _start_progress_updater(self) -> None:
         import contextvars
@@ -365,30 +404,47 @@ class SarGammaComparisonUI:
         power_level_dbm: float,
     ) -> None:
         try:
-            self.workflow_results = self.runner.run_workflow(
+            results = self.runner.run_workflow(
                 reference_file_path=reference_path,
                 power_level_dbm=power_level_dbm,
             )
-            self._stop_progress_updater(completed=True)
-            self._persist_state()
-            self.update_images()
-            self._update_analytical_results(self.workflow_results)
-            self.logger.info("SAR Pattern Validation done.")
+            self._dispatch_ui_update(
+                self._handle_workflow_success,
+                results=results,
+            )
         except Exception as error:  # noqa: BLE001
-            self._stop_progress_updater(completed=False)
-            button.style = {
-                "button_color": GuiColors.FAIL.value,
-                "text_color": GuiColors.TEXT_PRIMARY.value,
-            }
             message = str(error).strip() or "Workflow execution failed."
-            self._set_feedback_banner(message, severity="error")
-            self.logger.warning(message)
+            self._dispatch_ui_update(
+                self._handle_workflow_failure,
+                message=message,
+            )
         finally:
-            button.style = {
-                "button_color": GuiColors.PRIMARY.value,
-                "text_color": GuiColors.TEXT_PRIMARY.value,
-            }
-            self._refresh_run_button_state()
+            self._dispatch_ui_update(
+                self._finish_workflow_run,
+                button=button,
+            )
+
+    def _handle_workflow_success(self, *, results: WorkflowResultPayload) -> None:
+        self.workflow_results = results
+        self._stop_progress_updater(completed=True)
+        self._persist_state()
+        self.update_images()
+        self._update_analytical_results(results)
+        self.logger.info("SAR Pattern Validation done.")
+
+    def _handle_workflow_failure(self, *, message: str) -> None:
+        self.workflow_results = None
+        self._stop_progress_updater(completed=False)
+        self._set_feedback_banner(message, severity="error")
+        self.logger.warning(message)
+
+    def _finish_workflow_run(self, *, button: widgets.Button) -> None:
+        self._workflow_thread = None
+        button.style = {
+            "button_color": GuiColors.PRIMARY.value,
+            "text_color": GuiColors.TEXT_PRIMARY.value,
+        }
+        self._refresh_run_button_state()
 
     def handle_button_click(self, button: widgets.Button) -> None:
         button.style = {
@@ -396,21 +452,39 @@ class SarGammaComparisonUI:
             "text_color": GuiColors.TEXT_PRIMARY.value,
         }
         button.disabled = True
-        self._clear_feedback_banner()
+        self._prepare_for_new_run()
         self._start_progress_updater()
+        ipython = get_ipython()
+        kernel = getattr(ipython, "kernel", None)
+        io_loop = getattr(kernel, "io_loop", None)
+
+        if io_loop is None:
+            self._start_workflow_run(button)
+            return
+
+        # Let any in-flight widget value syncs land before we snapshot inputs for
+        # the backend run. This is especially important after restoring state.
+        io_loop.call_later(0.2, self._start_workflow_run, button)
+
+    def _start_workflow_run(self, button: widgets.Button) -> None:
+        import contextvars
+
         try:
             reference_path = self.radio_button_grid.selected_reference_path
             if reference_path is None:
                 raise RuntimeError("Select exactly one reference configuration.")
-            self.workflow_results = self.runner.run_workflow(
-                reference_file_path=reference_path,
-                power_level_dbm=float(self.power_level.value),
+            ctx = contextvars.copy_context()
+            self._workflow_thread = threading.Thread(
+                target=ctx.run,
+                args=(self._run_workflow_task,),
+                kwargs={
+                    "button": button,
+                    "reference_path": reference_path,
+                    "power_level_dbm": float(self.power_level.value),
+                },
+                daemon=True,
             )
-            self._stop_progress_updater(completed=True)
-            self._persist_state()
-            self.update_images()
-            self._update_analytical_results(self.workflow_results)
-            self.logger.info("SAR Pattern Validation done.")
+            self._workflow_thread.start()
         except Exception as error:  # noqa: BLE001
             self._stop_progress_updater(completed=False)
             button.style = {
@@ -420,7 +494,6 @@ class SarGammaComparisonUI:
             message = str(error).strip() or "Workflow execution failed."
             self._set_feedback_banner(message, severity="error")
             self.logger.warning(message)
-        finally:
             button.style = {
                 "button_color": GuiColors.PRIMARY.value,
                 "text_color": GuiColors.TEXT_PRIMARY.value,
@@ -628,6 +701,7 @@ class SarGammaComparisonUI:
             min=-10,
             max=50,
             step=0.1,
+            continuous_update=True,
             description="power level [dBm]:",
             style={"description_width": "initial"},
         )

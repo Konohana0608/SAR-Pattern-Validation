@@ -18,6 +18,7 @@ DOM notes (ipywidgets 8.x + voila 0.5):
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -105,6 +106,56 @@ def _ensure_run_button_enabled(voila_page) -> None:
     )
 
 
+def _wait_for_workflow_cycle(voila_page, timeout_ms: int = 120_000) -> None:
+    run_btn = voila_page.locator("button:has-text('Compare Patterns')")
+    _FIND_BTN = (
+        "() => [...document.querySelectorAll('button')]"
+        ".find(b => b.textContent.includes('Compare Patterns'))"
+    )
+    voila_page.wait_for_function(
+        f"() => {{ const b = ({_FIND_BTN})(); return b && b.disabled; }}",
+        timeout=10_000,
+    )
+    voila_page.wait_for_function(
+        f"() => {{ const b = ({_FIND_BTN})(); return b && !b.disabled; }}",
+        timeout=timeout_ms,
+    )
+    assert run_btn.get_attribute("disabled") is None
+
+
+def _extract_pssar_row_values(page_html: str) -> tuple[float, float, float, float]:
+    match = re.search(
+        (
+            r"Peak spatial-average SAR \(psSAR\).*?"
+            r"<tbody><tr>.*?"
+            r"<td style=\"[^\"]*\"><b style=\"color:[^\"]*\">(?:Pass|Fail)</b></td>.*?"
+            r"<td style=\"[^\"]*\">([0-9.]+) W/kg</td>.*?"
+            r"<td style=\"[^\"]*\">([0-9.]+) W/kg</td>.*?"
+            r"<td style=\"[^\"]*\">([0-9.]+) W/kg</td>.*?"
+            r"<td style=\"[^\"]*\">([-0-9.]+)</td>"
+        ),
+        page_html,
+        flags=re.S,
+    )
+    assert match is not None, "Could not extract the measured-value cell from the page."
+    return tuple(float(match.group(index)) for index in range(1, 5))
+
+
+def _set_power_level(voila_page, value: float) -> None:
+    power_input = voila_page.locator("input[type='number']").first
+    power_input.click()
+    power_input.fill(str(value))
+    power_input.press("Tab")
+    voila_page.wait_for_function(
+        "(expected) => {"
+        "  const input = document.querySelector(\"input[type='number']\");"
+        "  return input && Math.abs(Number(input.value) - expected) < 0.01;"
+        "}",
+        arg=value,
+        timeout=10_000,
+    )
+
+
 def test_clicking_filter_button_activates_it(voila_page) -> None:
     # Toggle buttons ARE the .widget-toggle-button elements (not nested inside them)
     voila_page.locator(".widget-toggle-button").first.click()
@@ -130,29 +181,13 @@ def test_run_button_enables_after_upload_and_unique_filter(voila_page) -> None:
 
 def test_run_workflow_and_check_results_table(voila_page) -> None:
     """Clicks Compare Patterns and asserts the results tables render without error."""
-    _WORKFLOW_TIMEOUT = 120_000  # ms — workflow can take a while on first uvx run
-
     _ensure_run_button_enabled(voila_page)
 
     run_btn = voila_page.locator("button:has-text('Compare Patterns')")
     assert run_btn.get_attribute("disabled") is None, "Run button must be enabled first"
 
     run_btn.click()
-
-    _FIND_BTN = (
-        "() => [...document.querySelectorAll('button')]"
-        ".find(b => b.textContent.includes('Compare Patterns'))"
-    )
-    # Wait for button to go disabled (workflow started)
-    voila_page.wait_for_function(
-        f"() => {{ const b = ({_FIND_BTN})(); return b && b.disabled; }}",
-        timeout=10_000,
-    )
-    # Wait for button to re-enable (workflow finished)
-    voila_page.wait_for_function(
-        f"() => {{ const b = ({_FIND_BTN})(); return b && !b.disabled; }}",
-        timeout=_WORKFLOW_TIMEOUT,
-    )
+    _wait_for_workflow_cycle(voila_page)
 
     body_text = voila_page.locator("body").inner_text()
     page_html = voila_page.content()
@@ -172,3 +207,48 @@ def test_run_workflow_and_check_results_table(voila_page) -> None:
     assert "Pass" in page_html or "Fail" in page_html, (
         f"No Pass/Fail result found.\nPage HTML tail:\n{page_html[-2000:]}"
     )
+
+
+def test_restored_session_rerun_updates_results_after_power_change(voila_page) -> None:
+    _ensure_run_button_enabled(voila_page)
+    _set_power_level(voila_page, 23.0)
+
+    run_btn = voila_page.locator("button:has-text('Compare Patterns')")
+    run_btn.click()
+    _wait_for_workflow_cycle(voila_page)
+    first_measured_value, first_measured_30dbm, _, first_scaling_error = (
+        _extract_pssar_row_values(voila_page.content())
+    )
+
+    voila_page.reload(timeout=_KERNEL_TIMEOUT)
+    voila_page.wait_for_selector(".widget-button", timeout=_KERNEL_TIMEOUT)
+    voila_page.wait_for_function(
+        f"() => document.body.innerText.includes('{_UPLOAD_CSV_PATH.name}')",
+        timeout=15_000,
+    )
+
+    restored_measured_value, restored_measured_30dbm, _, restored_scaling_error = (
+        _extract_pssar_row_values(voila_page.content())
+    )
+    assert restored_measured_value == pytest.approx(first_measured_value, abs=0.01)
+    assert restored_measured_30dbm == pytest.approx(first_measured_30dbm, abs=0.01)
+    assert restored_scaling_error == pytest.approx(first_scaling_error, abs=0.01)
+
+    _set_power_level(voila_page, 10.0)
+    run_btn = voila_page.locator("button:has-text('Compare Patterns')")
+    assert run_btn.get_attribute("disabled") is None
+
+    run_btn.click()
+    voila_page.wait_for_function(
+        "(expected) => !document.body.innerText.includes(expected)",
+        arg=f"{first_measured_value:.2f} W/kg",
+        timeout=10_000,
+    )
+    _wait_for_workflow_cycle(voila_page)
+
+    second_measured_value, second_measured_30dbm, _, second_scaling_error = (
+        _extract_pssar_row_values(voila_page.content())
+    )
+    assert second_measured_value == pytest.approx(first_measured_value, abs=0.01)
+    assert second_measured_30dbm != pytest.approx(first_measured_30dbm, abs=0.01)
+    assert second_scaling_error != pytest.approx(first_scaling_error, abs=0.01)

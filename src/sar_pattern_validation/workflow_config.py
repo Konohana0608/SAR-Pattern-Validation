@@ -229,9 +229,9 @@ class WorkflowResult(BaseModel):
     )
     @classmethod
     def _coerce_path(cls, value: str | Path | None) -> Path | None:
-        if value is None or isinstance(value, Path):
-            return value
-        return Path(value)
+        if value is None:
+            return None
+        return str(value)
 
     @field_validator("pass_rate_percent")
     @classmethod
