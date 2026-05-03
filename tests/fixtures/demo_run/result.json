@@ -1,0 +1,22 @@
+{
+  "aligned_measured_path": null,
+  "distance_to_agreement": 2.0,
+  "dose_to_agreement": 5.0,
+  "evaluated_pixel_count": 10653,
+  "failed_pixel_count": 6989,
+  "failure_image_path": null,
+  "gamma_image_path": null,
+  "input_power_level_dbm": 23.0,
+  "loaded_images_path": null,
+  "measured_image_path": null,
+  "measured_pssar": 26.200362509554846,
+  "measured_pssar_at_input_power": 5.227659595383826,
+  "measured_sha256": "62060bb3dd2cd5ec070722a6a739a7a168588fe74d8cd52ae85455eb4efb10aa",
+  "pass_rate_percent": 34.39406739885478,
+  "passed_pixel_count": 3664,
+  "reference_file": "dipole_1450MHz_Flat_10mm_10g.csv",
+  "reference_image_path": null,
+  "reference_pssar": 16.210813522338867,
+  "registered_overlay_path": null,
+  "scaling_error": 0.61622749366959
+}
