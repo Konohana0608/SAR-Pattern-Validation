@@ -290,10 +290,12 @@ def _complete_workflow(config: WorkflowConfig) -> WorkflowResult:
             measured_image_path=measured_image_save_path,
             aligned_measured_path=aligned_meas_save_path,
             measured_pssar=loader.measured_peak_30dbm,
+            measured_pssar_at_input_power=loader.measured_peak,
             reference_pssar=loader.reference_peak,
             scaling_error=loader.scaling_error,
             dose_to_agreement=config.dose_to_agreement,
             distance_to_agreement=config.distance_to_agreement,
+            input_power_level_dbm=config.power_level_dbm,
             gamma_map=gamma_map,
             evaluation_mask=evaluation_mask,
         )

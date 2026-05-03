@@ -210,10 +210,12 @@ class WorkflowResult(BaseModel):
     measured_image_path: Path | None
     aligned_measured_path: Path | None
     measured_pssar: float
+    measured_pssar_at_input_power: float | None = None
     reference_pssar: float
     scaling_error: float
     dose_to_agreement: float
     distance_to_agreement: float
+    input_power_level_dbm: float | None = None
     gamma_map: np.ndarray | None = Field(default=None, exclude=True, repr=False)
     evaluation_mask: np.ndarray | None = Field(default=None, exclude=True, repr=False)
 
