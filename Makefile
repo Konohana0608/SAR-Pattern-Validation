@@ -1,6 +1,6 @@
 # Makefile to recreate pyproject.toml using uv commands
 
-.PHONY: create-pyproject clean help sync tests tests-fast tests-slow tests-cov voila-smoke measurement-validation measurement-dashboard measurement-dashboard-open lint format typecheck setup-pre-commit
+.PHONY: create-pyproject clean help sync tests tests-fast tests-slow tests-cov voila-smoke kill-voila measurement-validation measurement-dashboard measurement-dashboard-open lint format typecheck setup-pre-commit
 
 # Default target
 help:
@@ -10,6 +10,7 @@ help:
 	@echo "  tests-slow           - Run only slow tests"
 	@echo "  tests-cov            - Run all tests with coverage report"
 	@echo "  voila-smoke          - Launch Voila against a temp workspace and verify the UI loads"
+	@echo "  kill-voila           - Stop stale Voila, smoke-runner, and Voila child kernel processes"
 	@echo "  measurement-validation - Run measurement validation in parallel with xdist"
 	@echo "  measurement-dashboard - Generate single HTML dashboard from per-frequency JSON reports"
 	@echo "  measurement-dashboard-open - Generate dashboard and open it in browser"
@@ -26,6 +27,7 @@ help:
 	@echo "  make tests-fast                                      # Run only fast tests"
 	@echo "  make tests-slow                                      # Run only slow tests"
 	@echo "  make voila-smoke                                     # Run the Voila smoke test"
+	@echo "  make kill-voila                                      # Stop stale Voila process trees"
 	@echo "  make tests target=test_image_loader.py               # Run all tests in a file"
 	@echo "  make tests target=test_image_loader.py::test_parse_and_build_no_resample  # Run specific test"
 	@echo "  make lint                                            # Run Ruff linter"
@@ -67,6 +69,10 @@ tests-cov:
 voila-smoke:
 	@echo "Running Voila smoke test..."
 	uv run python run_voila_smoke.py
+
+kill-voila:
+	@echo "Stopping stale Voila process trees..."
+	./src/sar_pattern_validation/voila_frontend/kill_voila_servers.sh
 
 measurement-validation:
 	@echo "Running measurement validation with xdist..."
