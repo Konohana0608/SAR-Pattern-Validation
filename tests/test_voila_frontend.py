@@ -356,20 +356,26 @@ def test_runner_streams_backend_log_file_lines(
         on_communicate=_write_backend_log,
     )
 
-    caplog.set_level(
-        logging.INFO, logger="sar_pattern_validation.voila_frontend.runner"
-    )
-    with (
-        patch.object(runner, "_backend_log_path", return_value=backend_log_path),
-        patch(
-            "sar_pattern_validation.voila_frontend.runner.subprocess.Popen",
-            return_value=success_run,
-        ),
-    ):
-        runner.run_workflow(
-            reference_file_path=Path("reference.csv"),
-            power_level_dbm=23.0,
-        )
+    # Attach caplog directly to the runner logger so capture survives even if
+    # a previous test (e.g. one using the sar_ui fixture) set propagate=False
+    # on the parent voila_frontend logger.
+    runner_logger = logging.getLogger("sar_pattern_validation.voila_frontend.runner")
+    runner_logger.addHandler(caplog.handler)
+    caplog.set_level(logging.INFO, logger=runner_logger.name)
+    try:
+        with (
+            patch.object(runner, "_backend_log_path", return_value=backend_log_path),
+            patch(
+                "sar_pattern_validation.voila_frontend.runner.subprocess.Popen",
+                return_value=success_run,
+            ),
+        ):
+            runner.run_workflow(
+                reference_file_path=Path("reference.csv"),
+                power_level_dbm=23.0,
+            )
+    finally:
+        runner_logger.removeHandler(caplog.handler)
 
     assert "[backend] Backend started" in caplog.text
     assert "[backend] Registration completed" in caplog.text
