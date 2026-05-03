@@ -1,7 +1,10 @@
+import hashlib
 import io
 import json
+import logging
 import os
 import subprocess
+import time
 from pathlib import Path
 from unittest.mock import PropertyMock, patch
 
@@ -25,6 +28,7 @@ from sar_pattern_validation.voila_frontend.state import (
     save_ui_state,
 )
 from sar_pattern_validation.voila_frontend.ui import (
+    TRANSPARENT_PNG,
     FilterButtonGrid,
     GuiColors,
     SarGammaComparisonUI,
@@ -52,10 +56,12 @@ def _make_result(**overrides) -> WorkflowResultPayload:
         measured_image_path=None,
         aligned_measured_path=None,
         measured_pssar=1.0,
+        measured_pssar_at_input_power=0.2,
         reference_pssar=1.1,
         scaling_error=0.1,
         dose_to_agreement=5.0,
         distance_to_agreement=2.0,
+        input_power_level_dbm=23.0,
     )
     return WorkflowResultPayload(**{**defaults, **overrides})
 
@@ -113,6 +119,31 @@ class _ImmediateIOLoop:
     def call_later(self, delay, callback, *args):
         self.calls.append((delay, callback, args))
         callback(*args)
+
+
+class _NeverRunsIOLoop:
+    def add_callback(self, callback):
+        self.callback = callback
+
+
+class _FakePopen:
+    def __init__(
+        self,
+        *,
+        returncode: int,
+        stdout: str,
+        stderr: str = "",
+        on_communicate=None,
+    ):
+        self.returncode = returncode
+        self._stdout = stdout
+        self._stderr = stderr
+        self._on_communicate = on_communicate
+
+    def communicate(self):
+        if self._on_communicate is not None:
+            self._on_communicate()
+        return self._stdout, self._stderr
 
 
 def test_default_workspace_paths_uses_notebooks_dir_for_repo_checkout(
@@ -214,7 +245,7 @@ def test_runner_raises_frontend_safe_error_for_backend_failure(
     workspace_with_database: WorkspacePaths,
 ) -> None:
     runner = SarPatternValidationRunner(workspace_with_database)
-    failed_run = _completed_process(
+    failed_run = _FakePopen(
         returncode=1,
         stdout=json.dumps(
             {
@@ -230,7 +261,7 @@ def test_runner_raises_frontend_safe_error_for_backend_failure(
 
     with (
         patch(
-            "sar_pattern_validation.voila_frontend.runner.subprocess.run",
+            "sar_pattern_validation.voila_frontend.runner.subprocess.Popen",
             return_value=failed_run,
         ),
         pytest.raises(RuntimeError, match="Measured CSV could not be parsed") as error,
@@ -247,7 +278,7 @@ def test_runner_sanitizes_invalid_backend_output(
     workspace_with_database: WorkspacePaths,
 ) -> None:
     runner = SarPatternValidationRunner(workspace_with_database)
-    failed_run = _completed_process(
+    failed_run = _FakePopen(
         returncode=1,
         stdout="not-json",
         stderr="Traceback (most recent call last):\nRuntimeError: secret backend detail\n",
@@ -255,7 +286,7 @@ def test_runner_sanitizes_invalid_backend_output(
 
     with (
         patch(
-            "sar_pattern_validation.voila_frontend.runner.subprocess.run",
+            "sar_pattern_validation.voila_frontend.runner.subprocess.Popen",
             return_value=failed_run,
         ),
         pytest.raises(
@@ -276,7 +307,7 @@ def test_runner_sets_timestamped_backend_log_file_env(
     workspace_with_database: WorkspacePaths,
 ) -> None:
     runner = SarPatternValidationRunner(workspace_with_database)
-    success_run = _completed_process(
+    success_run = _FakePopen(
         returncode=0,
         stdout=json.dumps(
             {
@@ -287,19 +318,61 @@ def test_runner_sets_timestamped_backend_log_file_env(
     )
 
     with patch(
-        "sar_pattern_validation.voila_frontend.runner.subprocess.run",
+        "sar_pattern_validation.voila_frontend.runner.subprocess.Popen",
         return_value=success_run,
-    ) as subprocess_run:
+    ) as popen:
         runner.run_workflow(
             reference_file_path=Path("reference.csv"),
             power_level_dbm=23.0,
         )
 
-    env = subprocess_run.call_args.kwargs["env"]
+    env = popen.call_args.kwargs["env"]
     backend_log_file = Path(env["SAR_PATTERN_VALIDATION_BACKEND_LOG_FILE"])
     assert backend_log_file.parent == workspace_with_database.system_state_dir
     assert backend_log_file.name.startswith("backend-")
     assert backend_log_file.suffix == ".log"
+
+
+def test_runner_streams_backend_log_file_lines(
+    workspace_with_database: WorkspacePaths, caplog: pytest.LogCaptureFixture
+) -> None:
+    runner = SarPatternValidationRunner(workspace_with_database)
+    backend_log_path = workspace_with_database.system_state_dir / "backend-test.log"
+
+    def _write_backend_log() -> None:
+        backend_log_path.write_text(
+            "Backend started\nRegistration completed\n",
+            encoding="utf-8",
+        )
+
+    success_run = _FakePopen(
+        returncode=0,
+        stdout=json.dumps(
+            {
+                "status": "success",
+                "result": _make_result().model_dump(mode="json"),
+            }
+        ),
+        on_communicate=_write_backend_log,
+    )
+
+    caplog.set_level(
+        logging.INFO, logger="sar_pattern_validation.voila_frontend.runner"
+    )
+    with (
+        patch.object(runner, "_backend_log_path", return_value=backend_log_path),
+        patch(
+            "sar_pattern_validation.voila_frontend.runner.subprocess.Popen",
+            return_value=success_run,
+        ),
+    ):
+        runner.run_workflow(
+            reference_file_path=Path("reference.csv"),
+            power_level_dbm=23.0,
+        )
+
+    assert "[backend] Backend started" in caplog.text
+    assert "[backend] Registration completed" in caplog.text
 
 
 def test_make_transparent_png_has_correct_dimensions() -> None:
@@ -601,9 +674,40 @@ class TestSarGammaComparisonUI:
         assert sar_ui.uploaded_file_name_label.value == "my_data.csv"
 
     def test_file_upload_empty_clears_label(self, sar_ui: SarGammaComparisonUI) -> None:
+        sar_ui.paths.measured_file_path.parent.mkdir(parents=True, exist_ok=True)
+        sar_ui.paths.measured_file_path.write_text("x,y,sar\n0,0,1\n", encoding="utf-8")
         sar_ui.uploaded_file_name_label.value = "old.csv"
         sar_ui._on_file_upload_change(Bunch(new=[]))
         assert sar_ui.uploaded_file_name_label.value == ""
+        assert sar_ui.paths.measured_file_path.exists() is False
+
+    def test_file_upload_change_clears_prior_results_and_feedback(
+        self, sar_ui: SarGammaComparisonUI
+    ) -> None:
+        sar_ui.workflow_results = _make_result(pass_rate_percent=88.0)
+        sar_ui.results_display.value = "<div>Old Results</div>"
+        sar_ui._set_feedback_banner("Previous warning", severity="warning")
+        for attr_name in (
+            "reference_image_path",
+            "measured_image_path",
+            "aligned_means_path",
+            "aligned_means_colorbar_path",
+            "registered_image_path",
+            "gamma_comparison_path",
+            "gamma_comparison_colorbar_path",
+            "gamma_comparison_failures_path",
+        ):
+            _write_png(getattr(sar_ui.paths, attr_name))
+
+        sar_ui._on_file_upload_change(
+            Bunch(new=[{"name": "replacement.csv", "content": b"x,y,sar\n0,0,2\n"}])
+        )
+
+        assert sar_ui.workflow_results is None
+        assert sar_ui.results_display.value == ""
+        assert sar_ui.feedback_banner.value == ""
+        assert sar_ui._build_state().last_result is None
+        assert bytes(sar_ui.image_top_left.value) == TRANSPARENT_PNG
 
     def test_update_analytical_results_shows_pass(
         self, sar_ui: SarGammaComparisonUI
@@ -632,6 +736,22 @@ class TestSarGammaComparisonUI:
     ) -> None:
         sar_ui._update_analytical_results(_make_result(pass_rate_percent=87.3))
         assert "87.3" in sar_ui.results_display.value
+
+    def test_update_analytical_results_uses_result_run_power_not_live_widget(
+        self, sar_ui: SarGammaComparisonUI
+    ) -> None:
+        sar_ui.power_level.value = 30.0
+        sar_ui._update_analytical_results(
+            _make_result(
+                measured_pssar=1.0,
+                measured_pssar_at_input_power=0.2,
+                input_power_level_dbm=23.0,
+            )
+        )
+
+        assert "Measured, 23.0 dBm" in sar_ui.results_display.value
+        assert ">0.20 W/kg<" in sar_ui.results_display.value
+        assert ">1.00 W/kg<" in sar_ui.results_display.value
 
     def test_update_images_no_data_sets_transparent_pixels(
         self, sar_ui: SarGammaComparisonUI
@@ -676,6 +796,31 @@ class TestSarGammaComparisonUI:
     ) -> None:
         assert sar_ui.power_level.continuous_update is True
 
+    def test_ui_includes_server_connection_monitor_banner(
+        self, sar_ui: SarGammaComparisonUI
+    ) -> None:
+        assert (
+            "sar-pattern-validation-server-status" in sar_ui.server_status_banner.value
+        )
+        assert "Could not reach the Voila server" in sar_ui.server_status_banner.value
+
+    def test_power_level_change_refreshes_run_button_state(
+        self, sar_ui: SarGammaComparisonUI, tmp_path: Path
+    ) -> None:
+        sar_ui.paths.measured_file_path.parent.mkdir(parents=True, exist_ok=True)
+        sar_ui.paths.measured_file_path.write_text("x,y,sar\n0,0,1\n", encoding="utf-8")
+        sar_ui.run_button.disabled = True
+
+        with patch.object(
+            type(sar_ui.radio_button_grid),
+            "selected_reference_path",
+            new_callable=PropertyMock,
+            return_value=tmp_path / "reference.csv",
+        ):
+            sar_ui._on_power_level_change(Bunch(name="value", new=11.0, old=23.0))
+
+        assert sar_ui.run_button.disabled is False
+
     def test_restore_state_with_no_state_file_does_not_crash(
         self, sar_ui: SarGammaComparisonUI
     ) -> None:
@@ -690,6 +835,7 @@ class TestSarGammaComparisonUI:
 
         with (
             patch.object(sar_ui, "_start_progress_updater"),
+            patch.object(sar_ui, "_start_stall_watchdog"),
             patch.object(sar_ui, "_stop_progress_updater"),
             patch(
                 "sar_pattern_validation.voila_frontend.ui.threading.Thread",
@@ -711,6 +857,82 @@ class TestSarGammaComparisonUI:
 
         assert "Measured CSV could not be parsed." in sar_ui.feedback_banner.value
         assert "Traceback" not in sar_ui.feedback_banner.value
+        assert sar_ui.run_button.disabled is False
+
+    def test_handle_button_click_connection_failure_shows_server_error(
+        self, sar_ui: SarGammaComparisonUI, tmp_path: Path
+    ) -> None:
+        sar_ui.paths.measured_file_path.parent.mkdir(parents=True, exist_ok=True)
+        sar_ui.paths.measured_file_path.write_text("x,y,sar\n0,0,1\n", encoding="utf-8")
+
+        with (
+            patch.object(sar_ui, "_start_progress_updater"),
+            patch.object(sar_ui, "_start_stall_watchdog"),
+            patch.object(sar_ui, "_stop_progress_updater"),
+            patch(
+                "sar_pattern_validation.voila_frontend.ui.threading.Thread",
+                _ImmediateThread,
+            ),
+            patch.object(
+                type(sar_ui.radio_button_grid),
+                "selected_reference_path",
+                new_callable=PropertyMock,
+                return_value=tmp_path / "reference.csv",
+            ),
+            patch.object(
+                sar_ui.runner,
+                "run_workflow",
+                side_effect=ConnectionError("[Errno 111] Connection refused"),
+            ),
+        ):
+            sar_ui.handle_button_click(sar_ui.run_button)
+
+        assert "Could not reach the Voila server" in sar_ui.feedback_banner.value
+        assert sar_ui.run_button.disabled is False
+
+    def test_handle_button_click_warns_and_skips_exact_repeat(
+        self, sar_ui: SarGammaComparisonUI, tmp_path: Path
+    ) -> None:
+        sar_ui.paths.measured_file_path.parent.mkdir(parents=True, exist_ok=True)
+        measured_bytes = b"x,y,sar\n0,0,1\n"
+        sar_ui.paths.measured_file_path.write_bytes(measured_bytes)
+        reference_path = tmp_path / "reference.csv"
+        measured_sha256 = hashlib.sha256(measured_bytes).hexdigest()
+        sar_ui.workflow_results = _make_result(
+            pass_rate_percent=88.0,
+            input_power_level_dbm=23.0,
+            reference_file_path=str(reference_path),
+            measured_file_sha256=measured_sha256,
+        )
+        sar_ui.results_display.value = "<div>Existing Results</div>"
+
+        for attr_name in (
+            "reference_image_path",
+            "measured_image_path",
+            "aligned_means_path",
+            "aligned_means_colorbar_path",
+            "registered_image_path",
+            "gamma_comparison_path",
+            "gamma_comparison_colorbar_path",
+            "gamma_comparison_failures_path",
+        ):
+            _write_png(getattr(sar_ui.paths, attr_name))
+
+        with (
+            patch.object(
+                type(sar_ui.radio_button_grid),
+                "selected_reference_path",
+                new_callable=PropertyMock,
+                return_value=reference_path,
+            ),
+            patch.object(sar_ui.runner, "run_workflow") as run_workflow,
+        ):
+            sar_ui.handle_button_click(sar_ui.run_button)
+
+        run_workflow.assert_not_called()
+        assert "already match the current results" in sar_ui.feedback_banner.value
+        assert "Existing Results" in sar_ui.results_display.value
+        assert sar_ui.run_button.disabled is False
 
     def test_handle_button_click_clears_prior_results_before_rerun(
         self, sar_ui: SarGammaComparisonUI, tmp_path: Path
@@ -733,7 +955,10 @@ class TestSarGammaComparisonUI:
             _write_png(getattr(sar_ui.paths, attr_name))
 
         def _assert_cleared_then_return(
-            *, reference_file_path: Path, power_level_dbm: float
+            *,
+            reference_file_path: Path,
+            power_level_dbm: float,
+            on_log_activity=None,
         ):
             assert sar_ui.workflow_results is None
             assert sar_ui.results_display.value == ""
@@ -741,6 +966,7 @@ class TestSarGammaComparisonUI:
 
         with (
             patch.object(sar_ui, "_start_progress_updater"),
+            patch.object(sar_ui, "_start_stall_watchdog"),
             patch.object(sar_ui, "_stop_progress_updater"),
             patch(
                 "sar_pattern_validation.voila_frontend.ui.threading.Thread",
@@ -783,6 +1009,7 @@ class TestSarGammaComparisonUI:
 
         with (
             patch.object(sar_ui, "_start_progress_updater"),
+            patch.object(sar_ui, "_start_stall_watchdog"),
             patch.object(sar_ui, "_stop_progress_updater"),
             patch(
                 "sar_pattern_validation.voila_frontend.ui.threading.Thread",
@@ -799,7 +1026,10 @@ class TestSarGammaComparisonUI:
                 "run_workflow",
                 return_value=_make_result(pass_rate_percent=91.0),
             ),
-            patch.object(sar_ui, "_persist_state", side_effect=_capture_persisted_state),
+            patch.object(sar_ui, "update_images"),
+            patch.object(
+                sar_ui, "_persist_state", side_effect=_capture_persisted_state
+            ),
         ):
             sar_ui.handle_button_click(sar_ui.run_button)
 
@@ -807,6 +1037,161 @@ class TestSarGammaComparisonUI:
         assert persisted_results[0] is None
         assert persisted_results[-1] is not None
         assert persisted_results[-1].pass_rate_percent == 91.0
+
+    def test_handle_button_click_reuses_existing_results_for_power_only_rerun(
+        self, sar_ui: SarGammaComparisonUI, tmp_path: Path
+    ) -> None:
+        sar_ui.paths.measured_file_path.parent.mkdir(parents=True, exist_ok=True)
+        measured_bytes = b"x,y,sar\n0,0,1\n"
+        sar_ui.paths.measured_file_path.write_bytes(measured_bytes)
+        reference_path = tmp_path / "reference.csv"
+        measured_sha256 = hashlib.sha256(measured_bytes).hexdigest()
+
+        sar_ui.workflow_results = _make_result(
+            pass_rate_percent=88.0,
+            measured_pssar=1.0,
+            measured_pssar_at_input_power=0.2,
+            reference_pssar=1.1,
+            scaling_error=-0.1,
+            input_power_level_dbm=23.0,
+            reference_file_path=str(reference_path),
+            measured_file_sha256=measured_sha256,
+        )
+
+        for attr_name in (
+            "reference_image_path",
+            "measured_image_path",
+            "aligned_means_path",
+            "aligned_means_colorbar_path",
+            "registered_image_path",
+            "gamma_comparison_path",
+            "gamma_comparison_colorbar_path",
+            "gamma_comparison_failures_path",
+        ):
+            _write_png(getattr(sar_ui.paths, attr_name))
+
+        sar_ui.power_level.value = 10.0
+
+        with (
+            patch.object(sar_ui, "_start_progress_updater"),
+            patch.object(sar_ui, "_start_stall_watchdog"),
+            patch.object(sar_ui, "_stop_progress_updater"),
+            patch.object(
+                type(sar_ui.radio_button_grid),
+                "selected_reference_path",
+                new_callable=PropertyMock,
+                return_value=reference_path,
+            ),
+            patch.object(sar_ui.runner, "run_workflow") as run_workflow,
+        ):
+            sar_ui.handle_button_click(sar_ui.run_button)
+
+        run_workflow.assert_not_called()
+        assert sar_ui.workflow_results is not None
+        assert sar_ui.workflow_results.input_power_level_dbm == 10.0
+        assert sar_ui.workflow_results.measured_pssar_at_input_power == pytest.approx(
+            0.2
+        )
+        assert sar_ui.workflow_results.measured_pssar == pytest.approx(20.0)
+        assert sar_ui.run_button.disabled is False
+
+    def test_dispatch_ui_update_timeout_uses_fail_safe_local_callback(
+        self, sar_ui: SarGammaComparisonUI
+    ) -> None:
+        calls: list[str] = []
+        fake_ipython = type(
+            "FakeIPython",
+            (),
+            {"kernel": type("FakeKernel", (), {"io_loop": _NeverRunsIOLoop()})()},
+        )()
+
+        with (
+            patch(
+                "sar_pattern_validation.voila_frontend.ui._UI_CALLBACK_TIMEOUT_S",
+                0.01,
+            ),
+            patch(
+                "sar_pattern_validation.voila_frontend.ui.get_ipython",
+                return_value=fake_ipython,
+            ),
+        ):
+            sar_ui._dispatch_ui_update(calls.append, "applied")
+
+        assert calls == ["applied"]
+
+    def test_stall_watchdog_surfaces_error_and_reenables_button(
+        self, sar_ui: SarGammaComparisonUI, tmp_path: Path
+    ) -> None:
+        sar_ui.paths.measured_file_path.parent.mkdir(parents=True, exist_ok=True)
+        sar_ui.paths.measured_file_path.write_text("x,y,sar\n0,0,1\n", encoding="utf-8")
+        sar_ui._workflow_thread = _DeferredThread()
+        run_id = sar_ui._begin_workflow_run()
+        sar_ui.run_button.disabled = True
+
+        with (
+            patch.object(
+                type(sar_ui.radio_button_grid),
+                "selected_reference_path",
+                new_callable=PropertyMock,
+                return_value=tmp_path / "reference.csv",
+            ),
+            patch(
+                "sar_pattern_validation.voila_frontend.ui._RUN_STALL_TIMEOUT_S",
+                0.01,
+            ),
+            patch(
+                "sar_pattern_validation.voila_frontend.ui._RUN_STALL_POLL_INTERVAL_S",
+                0.01,
+            ),
+        ):
+            sar_ui._start_stall_watchdog(button=sar_ui.run_button, run_id=run_id)
+            sar_ui._last_run_activity_at = time.monotonic() - 1.0
+            # Watchdog dispatches failure directly via _dispatch_ui_update; wait for it.
+            deadline = time.monotonic() + 2.0
+            while time.monotonic() < deadline and sar_ui._active_run_id is not None:
+                time.sleep(0.02)
+
+        assert "stopped making progress" in sar_ui.feedback_banner.value
+        assert sar_ui.run_button.disabled is False
+        assert sar_ui._active_run_id is None
+
+    def test_runner_backend_logs_reach_output_widget(
+        self, sar_ui: SarGammaComparisonUI
+    ) -> None:
+        backend_log_path = sar_ui.paths.system_state_dir / "backend-ui.log"
+
+        def _write_backend_log() -> None:
+            backend_log_path.write_text(
+                "Backend line one\nBackend line two\n", encoding="utf-8"
+            )
+
+        success_run = _FakePopen(
+            returncode=0,
+            stdout=json.dumps(
+                {
+                    "status": "success",
+                    "result": _make_result().model_dump(mode="json"),
+                }
+            ),
+            on_communicate=_write_backend_log,
+        )
+
+        with (
+            patch.object(
+                sar_ui.runner, "_backend_log_path", return_value=backend_log_path
+            ),
+            patch(
+                "sar_pattern_validation.voila_frontend.runner.subprocess.Popen",
+                return_value=success_run,
+            ),
+        ):
+            sar_ui.runner.run_workflow(
+                reference_file_path=Path("reference.csv"),
+                power_level_dbm=23.0,
+            )
+
+        assert any("Backend line one" in line for line in sar_ui.logging_window._lines)
+        assert any("Backend line two" in line for line in sar_ui.logging_window._lines)
 
     def test_handle_button_click_starts_background_workflow_thread(
         self, sar_ui: SarGammaComparisonUI, tmp_path: Path
@@ -817,6 +1202,7 @@ class TestSarGammaComparisonUI:
 
         with (
             patch.object(sar_ui, "_start_progress_updater"),
+            patch.object(sar_ui, "_start_stall_watchdog"),
             patch(
                 "sar_pattern_validation.voila_frontend.ui.threading.Thread",
                 _DeferredThread,
@@ -850,6 +1236,7 @@ class TestSarGammaComparisonUI:
 
         with (
             patch.object(sar_ui, "_start_progress_updater"),
+            patch.object(sar_ui, "_start_stall_watchdog"),
             patch(
                 "sar_pattern_validation.voila_frontend.ui.threading.Thread",
                 _DeferredThread,

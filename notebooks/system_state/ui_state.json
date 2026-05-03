@@ -1,24 +1,45 @@
 {
-  "measured_file_name": "measured_data.csv",
-  "power_level": 23.0,
   "active_filters": {
     "antenna_type": {
       "column_name": "Antenna Type",
       "value": "dipole"
     },
-    "frequency": {
-      "column_name": "Frequency [MHz]",
-      "value": 900.0
-    },
     "distance": {
       "column_name": "Distance [mm]",
       "value": 15.0
+    },
+    "frequency": {
+      "column_name": "Frequency [MHz]",
+      "value": 900.0
     },
     "mass": {
       "column_name": "Mass [g]",
       "value": 1.0
     }
   },
-  "last_result": null,
-  "updated_at_epoch_s": 1777815941.202833
+  "last_result": {
+    "aligned_measured_path": "/home/ordonez/osparc-services/sar-pattern-validation/notebooks/images/aligned_means_image.png",
+    "distance_to_agreement": 2.0,
+    "dose_to_agreement": 5.0,
+    "evaluated_pixel_count": 10138,
+    "failed_pixel_count": 0,
+    "failure_image_path": "/home/ordonez/osparc-services/sar-pattern-validation/notebooks/images/gamma_comparison_image_failures.png",
+    "gamma_image_path": "/home/ordonez/osparc-services/sar-pattern-validation/notebooks/images/gamma_comparison_image.png",
+    "input_power_level_dbm": 20.0,
+    "loaded_images_path": null,
+    "measured_file_sha256": "025114818bd101b9a506c874ade0e475c9c8b363032870434fa8e51c90760edc",
+    "measured_image_path": "/home/ordonez/osparc-services/sar-pattern-validation/notebooks/images/measured_image.png",
+    "measured_pssar": 1.01,
+    "measured_pssar_at_input_power": 0.101,
+    "pass_rate_percent": 100.0,
+    "passed_pixel_count": 10138,
+    "reference_file_path": "/home/ordonez/osparc-services/sar-pattern-validation/data/database/dipole_900MHz_Flat_15mm_1g.csv",
+    "reference_image_path": "/home/ordonez/osparc-services/sar-pattern-validation/notebooks/images/reference_image.png",
+    "reference_pssar": 10.9141583442688,
+    "registered_overlay_path": "/home/ordonez/osparc-services/sar-pattern-validation/notebooks/images/registered_image.png",
+    "scaling_error": -0.9074596530358782
+  },
+  "measured_file_name": "measured_data.csv",
+  "power_level": 20.0,
+  "updated_at_epoch_s": 1777837033.1742256
 }

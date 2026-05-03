@@ -123,6 +123,8 @@ def tmp_csv_pair(tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
+_DEMO_RUN_DIR = Path(__file__).resolve().parent / "fixtures" / "demo_run"
+_DEMO_REFERENCE_FILE = "dipole_1450MHz_Flat_10mm_10g.csv"
 
 
 @pytest.fixture
@@ -136,6 +138,59 @@ def workspace_with_database(tmp_path: Path):
     paths = WorkspacePaths.from_workspace(workspace_root)
     paths.ensure_runtime_dirs()
     return paths
+
+
+@pytest.fixture
+def completed_workspace(tmp_path: Path):
+    """Workspace pre-populated with a real completed run (images + result payload).
+
+    Copies pre-baked output images and measured CSV from tests/fixtures/demo_run/,
+    then returns (WorkspacePaths, WorkflowResultPayload) ready for use without
+    running the backend subprocess.  Completes in <1s.
+    """
+    import json
+    import shutil
+
+    from sar_pattern_validation.voila_frontend.models import WorkflowResultPayload
+    from sar_pattern_validation.voila_frontend.runtime import WorkspacePaths
+
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    (workspace_root / "sar-pattern-validation").symlink_to(_REPO_ROOT)
+    paths = WorkspacePaths.from_workspace(workspace_root)
+    paths.ensure_runtime_dirs()
+
+    shutil.copytree(_DEMO_RUN_DIR / "images", paths.images_dir, dirs_exist_ok=True)
+    shutil.copy2(
+        _DEMO_RUN_DIR / "uploaded_data" / "measured_data.csv",
+        paths.measured_file_path,
+    )
+
+    raw = json.loads((_DEMO_RUN_DIR / "result.json").read_text())
+    raw.pop("reference_file", None)
+    raw.pop("measured_sha256", None)
+    for path_field in (
+        "gamma_image_path",
+        "failure_image_path",
+        "registered_overlay_path",
+        "reference_image_path",
+        "measured_image_path",
+        "aligned_measured_path",
+    ):
+        raw[path_field] = None
+
+    import hashlib
+
+    reference_path = paths.project_root / "data" / "database" / _DEMO_REFERENCE_FILE
+    sha = hashlib.sha256(paths.measured_file_path.read_bytes()).hexdigest()
+    payload = WorkflowResultPayload.model_validate(raw)
+    payload = payload.model_copy(
+        update={
+            "reference_file_path": str(reference_path),
+            "measured_file_sha256": sha,
+        }
+    )
+    return paths, payload
 
 
 @pytest.fixture
@@ -173,6 +228,7 @@ def voila_server(tmp_path_factory: pytest.TempPathFactory):
     env = os.environ.copy()
     env["SAR_PATTERN_VALIDATION_BACKEND_MODE"] = "local"
     env["SAR_PATTERN_VALIDATION_LOCAL_PACKAGE_SOURCE"] = str(_REPO_ROOT)
+    env["SAR_PATTERN_VALIDATION_RUN_STALL_TIMEOUT_S"] = "5"
     env["MPLBACKEND"] = "Agg"
 
     proc = subprocess.Popen(

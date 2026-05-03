@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import hashlib
 import html
 import io
 import logging
+import os
 import threading
 import time
 from collections.abc import Callable
@@ -48,6 +50,20 @@ class GuiColors(str, Enum):
 
 
 _MAX_LOG_LINES = 200
+_UI_CALLBACK_TIMEOUT_S = 10.0
+_RUN_STALL_TIMEOUT_S = 60.0
+_RUN_STALL_POLL_INTERVAL_S = 0.5
+_EXACT_REPEAT_WARNING = (
+    "These inputs already match the current results; no new run was started."
+)
+_RUN_STALLED_ERROR = "The comparison run stopped making progress. Check the backend logs below and try again."
+_SERVER_UNREACHABLE_ERROR = (
+    "Could not reach the Voila server. Stop any stale Voila processes, restart "
+    "Voila, and reload this page."
+)
+_SERVER_STATUS_BANNER_ID = "sar-pattern-validation-server-status"
+_SERVER_STATUS_MONITOR_KEY = "__sarPatternValidationServerMonitorInstalled"
+_SERVER_STATUS_POLL_INTERVAL_MS = 5000
 
 _TH = "border:1px solid #555;padding:6px 10px;text-align:center;font-weight:bold;"
 _TD = "border:1px solid #555;padding:6px 10px;text-align:center;"
@@ -131,6 +147,88 @@ def placeholder_from_png(path: Path) -> bytes:
     with Image.open(path) as img:
         width, height = img.size
     return make_transparent_png(width, height)
+
+
+def _run_stall_timeout_seconds() -> float:
+    raw_value = os.getenv("SAR_PATTERN_VALIDATION_RUN_STALL_TIMEOUT_S", "").strip()
+    if not raw_value:
+        return _RUN_STALL_TIMEOUT_S
+    try:
+        return max(float(raw_value), 0.1)
+    except ValueError:
+        return _RUN_STALL_TIMEOUT_S
+
+
+def _normalize_failure_message(message: str) -> str:
+    normalized = message.strip() or "Workflow execution failed."
+    lowered = normalized.lower()
+    connection_markers = (
+        "connection refused",
+        "failed to establish a new connection",
+        "temporary failure in name resolution",
+        "name or service not known",
+        "nodename nor servname provided",
+        "network is unreachable",
+        "no route to host",
+        "connection reset by peer",
+        "connection aborted",
+        "server disconnected",
+        "broken pipe",
+        "could not connect",
+    )
+    if any(marker in lowered for marker in connection_markers):
+        return _SERVER_UNREACHABLE_ERROR
+    return normalized
+
+
+def _server_connection_monitor_markup() -> str:
+    return f"""
+    <div id=\"{_SERVER_STATUS_BANNER_ID}\" role=\"alert\" aria-live=\"assertive\"></div>
+    <img
+        src=\"data:image/gif;base64,R0lGODlhAQABAAAAACw=\"
+        alt=\"\"
+        style=\"display:none\"
+        onload=\"(function(element) {{
+            if (window['{_SERVER_STATUS_MONITOR_KEY}']) {{
+                element.remove();
+                return;
+            }}
+            window['{_SERVER_STATUS_MONITOR_KEY}'] = true;
+            const bannerId = '{_SERVER_STATUS_BANNER_ID}';
+            const message = {_SERVER_UNREACHABLE_ERROR!r};
+            const render = function(messageText) {{
+                const banner = document.getElementById(bannerId);
+                if (!banner) {{
+                    return;
+                }}
+                banner.innerHTML = messageText
+                    ? '<div style=&quot;background:#FDE8E8;border-left:4px solid {GuiColors.FAIL.value};padding:8px 12px;border-radius:6px;font-size:13px;color:#7B1515;font-family:Arial,sans-serif;&quot;><b>Error:</b> ' + messageText + '</div>'
+                    : '';
+            }};
+            const ping = function() {{
+                fetch(window.location.href, {{ method: 'HEAD', cache: 'no-store' }})
+                    .then(function(response) {{
+                        if (!response.ok) {{
+                            throw new Error('request failed');
+                        }}
+                        render('');
+                    }})
+                    .catch(function() {{
+                        render(message);
+                    }});
+            }};
+            window.addEventListener('offline', function() {{
+                render(message);
+            }});
+            window.addEventListener('online', function() {{
+                ping();
+            }});
+            window.setInterval(ping, {_SERVER_STATUS_POLL_INTERVAL_MS});
+            ping();
+            element.remove();
+        }})(this)\"
+    />
+    """
 
 
 class FilterButtonGrid:
@@ -268,9 +366,15 @@ class SarGammaComparisonUI:
         self.catalog = DatabaseSampleCatalog.scan(self.paths.database_path)
         self.runner = SarPatternValidationRunner(self.paths)
         self.workflow_results: WorkflowResultPayload | None = None
+        self._rerun_candidate_results: WorkflowResultPayload | None = None
         self._progress_thread = None
         self._workflow_thread = None
         self._stop_event = None
+        self._workflow_run_id = 0
+        self._active_run_id: int | None = None
+        self._stall_watchdog_stop_event: threading.Event | None = None
+        self._stall_watchdog_thread: threading.Thread | None = None
+        self._last_run_activity_at: float | None = None
 
         self.radio_button_grid = FilterButtonGrid(self.catalog, self._on_filter_change)
         display(self.create_ui())
@@ -291,6 +395,58 @@ class SarGammaComparisonUI:
         self._refresh_run_button_state()
         self._persist_state()
 
+    def _on_power_level_change(self, change: Bunch) -> None:
+        if change["name"] != "value":
+            return
+        self._persist_state()
+        self._refresh_run_button_state()
+
+    def _measured_file_sha256(self) -> str | None:
+        if not self.paths.measured_file_path.exists():
+            return None
+        return hashlib.sha256(self.paths.measured_file_path.read_bytes()).hexdigest()
+
+    def _same_dataset_as_current_inputs(
+        self, results: WorkflowResultPayload | None, reference_path: Path
+    ) -> bool:
+        if results is None:
+            return False
+        if results.reference_file_path != str(reference_path):
+            return False
+        if results.measured_file_sha256 != self._measured_file_sha256():
+            return False
+        return self._restore_outputs_available()
+
+    def _result_matches_current_inputs(
+        self, results: WorkflowResultPayload | None, reference_path: Path
+    ) -> bool:
+        if not self._same_dataset_as_current_inputs(results, reference_path):
+            return False
+        if results is None or results.input_power_level_dbm is None:
+            return False
+        return abs(
+            float(results.input_power_level_dbm) - float(self.power_level.value)
+        ) < (1e-9)
+
+    def _recalculate_results_for_power(
+        self, results: WorkflowResultPayload, *, power_level_dbm: float
+    ) -> WorkflowResultPayload | None:
+        raw_measured_peak = results.measured_pssar_at_input_power
+        if raw_measured_peak is None:
+            return None
+        measured_pssar_30dbm = raw_measured_peak * (
+            10 ** ((30.0 - float(power_level_dbm)) / 10.0)
+        )
+        scaling_error = (measured_pssar_30dbm / results.reference_pssar) - 1.0
+        return results.model_copy(
+            update={
+                "measured_pssar": measured_pssar_30dbm,
+                "measured_pssar_at_input_power": raw_measured_peak,
+                "scaling_error": scaling_error,
+                "input_power_level_dbm": float(power_level_dbm),
+            }
+        )
+
     def _refresh_run_button_state(self) -> None:
         self.run_button.disabled = not (
             not self._is_workflow_running()
@@ -305,6 +461,7 @@ class SarGammaComparisonUI:
         palette = {
             "error": ("#FDE8E8", GuiColors.FAIL.value, "#7B1515", "Error"),
             "warning": ("#FFF3CD", "#B8860B", "#7B6015", "Warning"),
+            "info": ("#E8F6FD", GuiColors.PRIMARY.value, "#005A8C", "Info"),
         }
         background, border, text_color, label = palette[severity]
         escaped_message = html.escape(message.strip())
@@ -323,9 +480,12 @@ class SarGammaComparisonUI:
         self.results_display.value = ""
         self._clear_feedback_banner()
         self.update_images(no_data=True)
+        self._rerun_candidate_results = None
         self._persist_state()
 
-    def _dispatch_ui_update(self, callback: Callable[..., None], /, *args, **kwargs) -> None:
+    def _dispatch_ui_update(
+        self, callback: Callable[..., None], /, *args, **kwargs
+    ) -> None:
         ipython = get_ipython()
         kernel = getattr(ipython, "kernel", None)
         io_loop = getattr(kernel, "io_loop", None)
@@ -346,11 +506,78 @@ class SarGammaComparisonUI:
                 finished.set()
 
         io_loop.add_callback(run_callback)
-        if not finished.wait(timeout=10.0):
-            self.logger.warning("Timed out while waiting for a UI update callback.")
+        if not finished.wait(timeout=_UI_CALLBACK_TIMEOUT_S):
+            self.logger.warning(
+                "Timed out while waiting for a UI update callback; applying a fail-safe local update."
+            )
+            callback(*args, **kwargs)
             return
         if errors:
             raise errors[0]
+
+    def _mark_run_activity(self, run_id: int | None = None) -> None:
+        if run_id is not None and run_id != self._active_run_id:
+            return
+        self._last_run_activity_at = time.monotonic()
+
+    def _cancel_stall_watchdog(self) -> None:
+        if self._stall_watchdog_stop_event is not None:
+            self._stall_watchdog_stop_event.set()
+        if (
+            self._stall_watchdog_thread is not None
+            and self._stall_watchdog_thread.is_alive()
+            and self._stall_watchdog_thread is not threading.current_thread()
+        ):
+            self._stall_watchdog_thread.join(timeout=1.0)
+        self._stall_watchdog_stop_event = None
+        self._stall_watchdog_thread = None
+        self._last_run_activity_at = None
+
+    def _begin_workflow_run(self) -> int:
+        self._workflow_run_id += 1
+        self._active_run_id = self._workflow_run_id
+        self._mark_run_activity(self._active_run_id)
+        return self._workflow_run_id
+
+    def _start_stall_watchdog(self, *, button: widgets.Button, run_id: int) -> None:
+        self._cancel_stall_watchdog()
+        self._stall_watchdog_stop_event = threading.Event()
+        self._mark_run_activity(run_id)
+
+        def watch_for_stall() -> None:
+            while True:
+                stop_event = self._stall_watchdog_stop_event
+                if stop_event is None:
+                    return
+                if stop_event.wait(_RUN_STALL_POLL_INTERVAL_S):
+                    return
+                if run_id != self._active_run_id:
+                    return
+                if self._last_run_activity_at is None:
+                    continue
+                if (
+                    time.monotonic() - self._last_run_activity_at
+                    < _run_stall_timeout_seconds()
+                ):
+                    continue
+                self._dispatch_ui_update(
+                    self._handle_workflow_failure,
+                    message=_RUN_STALLED_ERROR,
+                    button=button,
+                    run_id=run_id,
+                )
+                self._dispatch_ui_update(
+                    self._finish_workflow_run,
+                    button=button,
+                    run_id=run_id,
+                )
+                return
+
+        self._stall_watchdog_thread = threading.Thread(
+            target=watch_for_stall,
+            daemon=True,
+        )
+        self._stall_watchdog_thread.start()
 
     def _start_progress_updater(self) -> None:
         import contextvars
@@ -382,7 +609,7 @@ class SarGammaComparisonUI:
     def _stop_progress_updater(self, *, completed: bool) -> None:
         if self._stop_event is not None:
             self._stop_event.set()
-        if self._progress_thread and self._progress_thread.is_alive():
+        if self._progress_thread is not None and self._progress_thread.is_alive():
             self._progress_thread.join(timeout=1.0)
         if completed:
             for value in range(int(self.progress_bar.value * 100), 101, 5):
@@ -402,77 +629,202 @@ class SarGammaComparisonUI:
         button: widgets.Button,
         reference_path: Path,
         power_level_dbm: float,
+        measured_file_sha256: str | None,
+        run_id: int,
     ) -> None:
         try:
             results = self.runner.run_workflow(
                 reference_file_path=reference_path,
                 power_level_dbm=power_level_dbm,
+                on_log_activity=lambda: self._mark_run_activity(run_id),
+            )
+            results = results.model_copy(
+                update={
+                    "reference_file_path": str(reference_path),
+                    "measured_file_sha256": measured_file_sha256,
+                }
             )
             self._dispatch_ui_update(
                 self._handle_workflow_success,
                 results=results,
+                run_id=run_id,
             )
         except Exception as error:  # noqa: BLE001
             message = str(error).strip() or "Workflow execution failed."
             self._dispatch_ui_update(
                 self._handle_workflow_failure,
                 message=message,
+                button=button,
+                run_id=run_id,
             )
         finally:
             self._dispatch_ui_update(
                 self._finish_workflow_run,
                 button=button,
+                run_id=run_id,
             )
 
-    def _handle_workflow_success(self, *, results: WorkflowResultPayload) -> None:
+    def _handle_workflow_success(
+        self, *, results: WorkflowResultPayload, run_id: int
+    ) -> None:
+        if run_id != self._active_run_id:
+            self.logger.info("Discarded stale workflow success for run %s.", run_id)
+            return
         self.workflow_results = results
+        self._mark_run_activity(run_id)
         self._stop_progress_updater(completed=True)
         self._persist_state()
         self.update_images()
         self._update_analytical_results(results)
         self.logger.info("SAR Pattern Validation done.")
 
-    def _handle_workflow_failure(self, *, message: str) -> None:
+    def _handle_reused_results(self, *, results: WorkflowResultPayload) -> None:
+        self.workflow_results = results
+        self._persist_state()
+        self.update_images()
+        self._update_analytical_results(results)
+        power_dbm = (
+            float(results.input_power_level_dbm)
+            if results.input_power_level_dbm is not None
+            else float(self.power_level.value)
+        )
+        self._set_feedback_banner(
+            f"Results updated for {power_dbm:.1f} dBm input power. "
+            "Registration and gamma map reused from the previous run.",
+            severity="info",
+        )
+        self.logger.info(
+            "Reused previous registration and gamma outputs for power-only rerun."
+        )
+
+    def _handle_workflow_failure(
+        self, *, message: str, button: widgets.Button | None, run_id: int | None
+    ) -> None:
+        if run_id is not None and run_id != self._active_run_id:
+            self.logger.info("Discarded stale workflow failure for run %s.", run_id)
+            return
+        message = _normalize_failure_message(message)
         self.workflow_results = None
         self._stop_progress_updater(completed=False)
         self._set_feedback_banner(message, severity="error")
-        self.logger.warning(message)
+        self.logger.error(message)
+        self._persist_state()
+        if button is not None:
+            button.style = {
+                "button_color": GuiColors.PRIMARY.value,
+                "text_color": GuiColors.TEXT_PRIMARY.value,
+            }
+        self._refresh_run_button_state()
 
-    def _finish_workflow_run(self, *, button: widgets.Button) -> None:
+    def _finish_workflow_run(
+        self, *, button: widgets.Button, run_id: int | None
+    ) -> None:
+        if run_id is not None and run_id != self._active_run_id:
+            return
+        self._cancel_stall_watchdog()
         self._workflow_thread = None
+        self._rerun_candidate_results = None
+        self._active_run_id = None
         button.style = {
             "button_color": GuiColors.PRIMARY.value,
             "text_color": GuiColors.TEXT_PRIMARY.value,
         }
         self._refresh_run_button_state()
 
+    def _reset_after_new_upload(self) -> None:
+        self._active_run_id = None
+        self._workflow_thread = None
+        self._cancel_stall_watchdog()
+        self._stop_progress_updater(completed=False)
+        self.workflow_results = None
+        self._rerun_candidate_results = None
+        self.results_display.value = ""
+        self._clear_feedback_banner()
+        self.update_images(no_data=True)
+        self.run_button.style = {
+            "button_color": GuiColors.PRIMARY.value,
+            "text_color": GuiColors.TEXT_PRIMARY.value,
+        }
+        self._persist_state()
+        self._refresh_run_button_state()
+
     def handle_button_click(self, button: widgets.Button) -> None:
+        try:
+            reference_path = self.radio_button_grid.selected_reference_path
+            if reference_path is None:
+                raise RuntimeError("Select exactly one reference configuration.")
+            rerun_candidate = self.workflow_results
+            measured_file_sha256 = self._measured_file_sha256()
+            if self._result_matches_current_inputs(rerun_candidate, reference_path):
+                self._set_feedback_banner(_EXACT_REPEAT_WARNING, severity="warning")
+                self.logger.warning(_EXACT_REPEAT_WARNING)
+                self._refresh_run_button_state()
+                return
+            if self._same_dataset_as_current_inputs(rerun_candidate, reference_path):
+                reused_results = self._recalculate_results_for_power(
+                    rerun_candidate,
+                    power_level_dbm=float(self.power_level.value),
+                )
+                if reused_results is not None:
+                    self._handle_reused_results(results=reused_results)
+                    self._refresh_run_button_state()
+                    return
+
+            self._rerun_candidate_results = rerun_candidate
+            run_id = self._begin_workflow_run()
+            self._prepare_for_new_run()
+            self._start_progress_updater()
+            self._start_stall_watchdog(button=button, run_id=run_id)
+        except Exception as error:  # noqa: BLE001
+            message = str(error).strip() or "Workflow execution failed."
+            self._handle_workflow_failure(message=message, button=button, run_id=None)
+            return
+
         button.style = {
             "button_color": GuiColors.LOADING.value,
             "text_color": GuiColors.TEXT_PRIMARY.value,
         }
         button.disabled = True
-        self._prepare_for_new_run()
-        self._start_progress_updater()
         ipython = get_ipython()
         kernel = getattr(ipython, "kernel", None)
         io_loop = getattr(kernel, "io_loop", None)
 
         if io_loop is None:
-            self._start_workflow_run(button)
+            self._start_workflow_run(
+                button,
+                reference_path=reference_path,
+                measured_file_sha256=measured_file_sha256,
+                power_level_dbm=float(self.power_level.value),
+                run_id=run_id,
+            )
             return
 
         # Let any in-flight widget value syncs land before we snapshot inputs for
         # the backend run. This is especially important after restoring state.
-        io_loop.call_later(0.2, self._start_workflow_run, button)
+        io_loop.call_later(
+            0.2,
+            self._start_workflow_run,
+            button,
+            reference_path,
+            measured_file_sha256,
+            float(self.power_level.value),
+            run_id,
+        )
 
-    def _start_workflow_run(self, button: widgets.Button) -> None:
+    def _start_workflow_run(
+        self,
+        button: widgets.Button,
+        reference_path: Path,
+        measured_file_sha256: str | None,
+        power_level_dbm: float,
+        run_id: int,
+    ) -> None:
         import contextvars
 
         try:
-            reference_path = self.radio_button_grid.selected_reference_path
-            if reference_path is None:
-                raise RuntimeError("Select exactly one reference configuration.")
+            if run_id != self._active_run_id:
+                self.logger.info("Skipped starting stale workflow run %s.", run_id)
+                return
             ctx = contextvars.copy_context()
             self._workflow_thread = threading.Thread(
                 target=ctx.run,
@@ -480,46 +832,48 @@ class SarGammaComparisonUI:
                 kwargs={
                     "button": button,
                     "reference_path": reference_path,
-                    "power_level_dbm": float(self.power_level.value),
+                    "power_level_dbm": power_level_dbm,
+                    "measured_file_sha256": measured_file_sha256,
+                    "run_id": run_id,
                 },
                 daemon=True,
             )
             self._workflow_thread.start()
         except Exception as error:  # noqa: BLE001
-            self._stop_progress_updater(completed=False)
-            button.style = {
-                "button_color": GuiColors.FAIL.value,
-                "text_color": GuiColors.TEXT_PRIMARY.value,
-            }
             message = str(error).strip() or "Workflow execution failed."
-            self._set_feedback_banner(message, severity="error")
-            self.logger.warning(message)
-            button.style = {
-                "button_color": GuiColors.PRIMARY.value,
-                "text_color": GuiColors.TEXT_PRIMARY.value,
-            }
-            self._refresh_run_button_state()
+            self._handle_workflow_failure(
+                message=message,
+                button=button,
+                run_id=run_id,
+            )
+            self._finish_workflow_run(button=button, run_id=run_id)
 
     def _update_analytical_results(self, results: WorkflowResultPayload) -> None:
-        power_level_dbm = float(self.power_level.value)
-        measured_at_power = results.measured_pssar * (
-            10 ** ((power_level_dbm - 30.0) / 10.0)
+        run_power_level_dbm = (
+            float(results.input_power_level_dbm)
+            if results.input_power_level_dbm is not None
+            else float(self.power_level.value)
+        )
+        measured_at_power = (
+            float(results.measured_pssar_at_input_power)
+            if results.measured_pssar_at_input_power is not None
+            else results.measured_pssar * (10 ** ((run_power_level_dbm - 30.0) / 10.0))
         )
         pssar_pass = abs(results.scaling_error * 100) <= 10.0
         pattern_pass = results.pass_rate_percent >= 100.0
 
         def result_cell(passed: bool) -> str:
-            color = GuiColors.PRIMARY.value if passed else GuiColors.FAIL.value
+            bg = GuiColors.PRIMARY.value if passed else GuiColors.FAIL.value
             text = "Pass" if passed else "Fail"
-            return f'<td style="{_TD}"><b style="color:{color}">{text}</b></td>'
+            return f'<td style="{_TD}background:{bg};"><b style="color:#000">{text}</b></td>'
 
         self.results_display.value = f"""
         <div style="font-family:Arial,sans-serif;font-size:13px;">
-          <p style="margin:0 0 4px 0;">Peak spatial-average SAR (psSAR)</p>
+          <p style="margin:0 0 8px 0;font-weight:bold;font-size:14px;">Peak spatial-average SAR (psSAR)</p>
           <table style="border-collapse:collapse;margin-bottom:16px;">
             <thead><tr>
               <th style="{_TH}">Result</th>
-              <th style="{_TH}">Measured</th>
+              <th style="{_TH}">Measured, {run_power_level_dbm:.1f} dBm</th>
               <th style="{_TH}">Measured, 30 dBm</th>
               <th style="{_TH}">Reference, 30 dBm</th>
               <th style="{_TH}">Scaling Error [%]</th>
@@ -534,7 +888,7 @@ class SarGammaComparisonUI:
               <td style="{_TD}">&le; &plusmn; 10</td>
             </tr></tbody>
           </table>
-          <p style="margin:0 0 4px 0;">SAR pattern match</p>
+          <p style="margin:0 0 8px 0;font-weight:bold;font-size:14px;">SAR pattern match</p>
           <table style="border-collapse:collapse;">
             <thead><tr>
               <th style="{_TH}">Result</th>
@@ -554,16 +908,16 @@ class SarGammaComparisonUI:
         value = change["new"]
         if not value:
             self.uploaded_file_name_label.value = ""
-            self._persist_state()
-            self._refresh_run_button_state()
+            if self.paths.measured_file_path.exists():
+                self.paths.measured_file_path.unlink()
+            self._reset_after_new_upload()
             return
 
         file_info = value[0]
         self.uploaded_file_name_label.value = str(file_info["name"])
         self.paths.measured_file_path.parent.mkdir(parents=True, exist_ok=True)
         self.paths.measured_file_path.write_bytes(file_info["content"])
-        self._persist_state()
-        self._refresh_run_button_state()
+        self._reset_after_new_upload()
 
     def restore_state(self) -> None:
         state = load_or_migrate_ui_state(self.paths)
@@ -705,7 +1059,7 @@ class SarGammaComparisonUI:
             description="power level [dBm]:",
             style={"description_width": "initial"},
         )
-        self.power_level.observe(lambda change: self._persist_state(), names="value")
+        self.power_level.observe(self._on_power_level_change, names="value")
         self.uploaded_file_name_label = widgets.Label(value="")
 
         tooltip = widgets.HTML(
@@ -747,6 +1101,9 @@ class SarGammaComparisonUI:
             disabled=True,
         )
         self.run_button.on_click(self.handle_button_click)
+        self.server_status_banner = widgets.HTML(
+            value=_server_connection_monitor_markup()
+        )
         self.feedback_banner = widgets.HTML(value="")
         self.results_display = widgets.HTML(value="")
         run_button_row = row(
@@ -858,6 +1215,7 @@ class SarGammaComparisonUI:
             [
                 run_button_row,
                 progress_bar_container,
+                self.server_status_banner,
                 self.feedback_banner,
                 images_section,
                 self.results_display,

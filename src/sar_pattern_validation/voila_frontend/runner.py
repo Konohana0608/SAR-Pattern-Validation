@@ -4,6 +4,9 @@ import json
 import logging
 import os
 import subprocess
+import threading
+import time
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
@@ -46,6 +49,47 @@ def _log_backend_stderr(stderr: str) -> None:
         line = line.strip()
         if line:
             LOGGER.debug(line)
+
+
+def _stream_backend_log_file(
+    backend_log_path: Path,
+    *,
+    stop_event: threading.Event,
+    on_log_activity: Callable[[], None] | None = None,
+) -> None:
+    last_position = 0
+    partial_line = ""
+
+    while True:
+        if backend_log_path.exists():
+            with backend_log_path.open(
+                "r", encoding="utf-8", errors="replace"
+            ) as handle:
+                handle.seek(last_position)
+                chunk = handle.read()
+                last_position = handle.tell()
+            if chunk:
+                combined = partial_line + chunk
+                lines = combined.splitlines(keepends=True)
+                partial_line = ""
+                for line in lines:
+                    if line.endswith("\n") or line.endswith("\r"):
+                        formatted = line.strip()
+                        if formatted:
+                            LOGGER.info("[backend] %s", formatted)
+                            if on_log_activity is not None:
+                                on_log_activity()
+                    else:
+                        partial_line = line
+
+        if stop_event.is_set():
+            break
+        time.sleep(0.2)
+
+    if partial_line.strip():
+        LOGGER.info("[backend] %s", partial_line.strip())
+        if on_log_activity is not None:
+            on_log_activity()
 
 
 class SarPatternValidationRunner:
@@ -109,6 +153,7 @@ class SarPatternValidationRunner:
         *,
         reference_file_path: Path,
         power_level_dbm: float,
+        on_log_activity: Callable[[], None] | None = None,
     ) -> WorkflowResultPayload:
         cmd = self.build_command(
             "--measured_file_path",
@@ -141,28 +186,51 @@ class SarPatternValidationRunner:
         )
         LOGGER.info("Backend log file: %s", backend_log_path)
         LOGGER.debug("Backend source spec: %s", self.backend_source_spec())
-        result = subprocess.run(cmd, capture_output=True, text=True, env=env)
+        stop_event = threading.Event()
+        log_thread = threading.Thread(
+            target=_stream_backend_log_file,
+            kwargs={
+                "backend_log_path": backend_log_path,
+                "stop_event": stop_event,
+                "on_log_activity": on_log_activity,
+            },
+            daemon=True,
+        )
+        log_thread.start()
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=env,
+        )
         try:
-            payload = json.loads(result.stdout)
+            stdout, stderr = process.communicate()
+        finally:
+            stop_event.set()
+            log_thread.join(timeout=2.0)
+
+        try:
+            payload = json.loads(stdout)
         except json.JSONDecodeError as error:
             message = (
                 "Workflow backend returned an invalid response."
                 " Check backend logs for details."
                 f" Backend log: {backend_log_path}."
-                f"{_install_hint(result.stdout, result.stderr)}"
+                f"{_install_hint(stdout, stderr)}"
             )
             LOGGER.error(message)
             raise WorkflowExecutionError(message) from error
 
-        if result.returncode != 0:
-            _log_backend_stderr(result.stderr)
+        if process.returncode != 0:
+            _log_backend_stderr(stderr)
             message = (
                 f"{_extract_error_message(payload)} Backend log: {backend_log_path}."
             )
             LOGGER.error("Workflow backend failed: %s", message)
             raise WorkflowExecutionError(message)
 
-        _log_backend_stderr(result.stderr)
+        _log_backend_stderr(stderr)
         LOGGER.info("Comparison completed successfully.")
 
         return WorkflowResultPayload.model_validate(payload["result"])
