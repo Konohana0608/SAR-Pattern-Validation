@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextvars
 import json
 import logging
 import os
@@ -203,8 +204,10 @@ class SarPatternValidationRunner:
         LOGGER.info("Backend log file: %s", backend_log_path)
         LOGGER.debug("Backend source spec: %s", self.backend_source_spec())
         stop_event = threading.Event()
+        log_ctx = contextvars.copy_context()
         log_thread = threading.Thread(
-            target=_stream_backend_log_file,
+            target=log_ctx.run,
+            args=(_stream_backend_log_file,),
             kwargs={
                 "backend_log_path": backend_log_path,
                 "stop_event": stop_event,

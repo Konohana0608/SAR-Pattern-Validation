@@ -540,6 +540,8 @@ class SarGammaComparisonUI:
         return self._workflow_run_id
 
     def _start_stall_watchdog(self, *, button: widgets.Button, run_id: int) -> None:
+        import contextvars
+
         self._cancel_stall_watchdog()
         self._stall_watchdog_stop_event = threading.Event()
         self._mark_run_activity(run_id)
@@ -573,8 +575,10 @@ class SarGammaComparisonUI:
                 )
                 return
 
+        watchdog_ctx = contextvars.copy_context()
         self._stall_watchdog_thread = threading.Thread(
-            target=watch_for_stall,
+            target=watchdog_ctx.run,
+            args=(watch_for_stall,),
             daemon=True,
         )
         self._stall_watchdog_thread.start()
@@ -932,9 +936,27 @@ class SarGammaComparisonUI:
             return
 
         file_info = value[0]
+        new_content = file_info["content"]
+        new_sha256 = hashlib.sha256(new_content).hexdigest()
+        prior_sha256 = (
+            self.workflow_results.measured_file_sha256
+            if self.workflow_results is not None
+            else None
+        )
+
         self.uploaded_file_name_label.value = str(file_info["name"])
         self.paths.measured_file_path.parent.mkdir(parents=True, exist_ok=True)
-        self.paths.measured_file_path.write_bytes(file_info["content"])
+        self.paths.measured_file_path.write_bytes(new_content)
+
+        if (
+            prior_sha256 is not None
+            and prior_sha256 == new_sha256
+            and self._restore_outputs_available()
+        ):
+            self._persist_state()
+            self._refresh_run_button_state()
+            return
+
         self._reset_after_new_upload()
 
     def restore_state(self) -> None:

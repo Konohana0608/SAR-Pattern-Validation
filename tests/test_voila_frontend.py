@@ -718,6 +718,33 @@ class TestSarGammaComparisonUI:
         assert sar_ui._build_state().last_result is None
         assert bytes(sar_ui.image_top_left.value) == TRANSPARENT_PNG
 
+    def test_file_upload_same_sha_keeps_existing_results(
+        self, sar_ui: SarGammaComparisonUI
+    ) -> None:
+        content = b"x,y,sar\n0,0,2\n1,1,3\n"
+        sha = hashlib.sha256(content).hexdigest()
+        sar_ui.workflow_results = _make_result(measured_file_sha256=sha)
+        sar_ui.results_display.value = "<div>Existing Results</div>"
+        for attr_name in (
+            "reference_image_path",
+            "measured_image_path",
+            "aligned_means_path",
+            "aligned_means_colorbar_path",
+            "registered_image_path",
+            "gamma_comparison_path",
+            "gamma_comparison_colorbar_path",
+            "gamma_comparison_failures_path",
+        ):
+            _write_png(getattr(sar_ui.paths, attr_name))
+
+        sar_ui._on_file_upload_change(
+            Bunch(new=[{"name": "measured.csv", "content": content}])
+        )
+
+        assert sar_ui.workflow_results is not None
+        assert sar_ui.results_display.value == "<div>Existing Results</div>"
+        assert sar_ui.uploaded_file_name_label.value == "measured.csv"
+
     def test_update_analytical_results_shows_pass(
         self, sar_ui: SarGammaComparisonUI
     ) -> None:
