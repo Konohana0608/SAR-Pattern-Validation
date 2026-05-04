@@ -28,8 +28,11 @@ from sar_pattern_validation.workflows import (
     ValidationIssue,
     WorkflowValidationError,
     _apply_roi_policy,
+    _check_mask_inscribed_square,
     _csv_format_issue_from_error,
+    _largest_inscribed_square_mm,
     _measurement_area_issue_from_config_error,
+    _noise_floor_issue_from_config_error,
     _select_registration_mask,
     complete_workflow,
 )
@@ -646,3 +649,102 @@ def test_complete_workflow_non_validation_error_preserves_workflow_execution_err
         )
     # Generic missing-input error should NOT carry a ValidationIssue
     assert not isinstance(exc_info.value, WorkflowValidationError)
+
+
+# ---------------------------------------------------------------------------
+# Noise floor validation (Task 6.6)
+# ---------------------------------------------------------------------------
+
+
+def test_noise_floor_out_of_bounds_translates_to_validation_issue() -> None:
+    with pytest.raises(WorkflowValidationError) as exc_info:
+        complete_workflow(
+            measured_file_path="does/not/exist.csv",
+            reference_file_path="also/missing.csv",
+            noise_floor_wkg=-0.1,
+        )
+
+    assert exc_info.value.issue.code == NOISE_FLOOR_OUT_OF_BOUNDS
+    assert exc_info.value.issue.severity == "error"
+
+
+def test_noise_floor_at_upper_bound_accepted() -> None:
+    # 10.0 is accepted (le=10.0)
+    from sar_pattern_validation.workflow_schema import validate_workflow_config
+
+    config = validate_workflow_config({"noise_floor_wkg": 10.0})
+    assert config.noise_floor_wkg == 10.0
+
+
+def test_noise_floor_above_upper_bound_rejected() -> None:
+    with pytest.raises(WorkflowValidationError) as exc_info:
+        complete_workflow(
+            measured_file_path="does/not/exist.csv",
+            reference_file_path="also/missing.csv",
+            noise_floor_wkg=10.01,
+        )
+
+    assert exc_info.value.issue.code == NOISE_FLOOR_OUT_OF_BOUNDS
+
+
+def test_noise_floor_issue_translator_returns_none_for_other_field() -> None:
+    err = ConfigValidationError(
+        "1 validation error for WorkflowConfig\nlog_level\n  must be one of"
+    )
+    assert _noise_floor_issue_from_config_error(err) is None
+
+
+# ---------------------------------------------------------------------------
+# Mask too small validation (Task 6.6)
+# ---------------------------------------------------------------------------
+
+
+def _make_mask_image(
+    arr: np.ndarray, spacing_mm: tuple[float, float] = (1.0, 1.0)
+) -> sitk.Image:
+    """Create a UInt8 mask image from a boolean array with given spacing in mm."""
+    img = sitk.GetImageFromArray(arr.astype(np.uint8))
+    img.SetSpacing(spacing_mm)
+    return img
+
+
+def test_largest_inscribed_square_mm_basic() -> None:
+    # 30x30 pixel all-True mask with 1mm spacing -> 30mm inscribed square
+    arr = np.ones((30, 30), dtype=bool)
+    mask = _make_mask_image(arr, spacing_mm=(1.0, 1.0))
+    assert _largest_inscribed_square_mm(mask) == pytest.approx(30.0)
+
+
+def test_largest_inscribed_square_mm_empty_mask() -> None:
+    arr = np.zeros((30, 30), dtype=bool)
+    mask = _make_mask_image(arr, spacing_mm=(1.0, 1.0))
+    assert _largest_inscribed_square_mm(mask) == 0.0
+
+
+def test_mask_too_small_translates_to_validation_issue() -> None:
+    # 20x20 pixel mask at 1mm spacing -> 20mm < 22mm threshold
+    arr = np.ones((20, 20), dtype=bool)
+    mask = _make_mask_image(arr, spacing_mm=(1.0, 1.0))
+
+    with pytest.raises(WorkflowValidationError) as exc_info:
+        _check_mask_inscribed_square(mask, required_mm=22.0)
+
+    assert exc_info.value.issue.code == MASK_TOO_SMALL
+    assert exc_info.value.issue.severity == "error"
+    assert exc_info.value.issue.details["found_mm"] == pytest.approx(20.0)
+    assert exc_info.value.issue.details["required_mm"] == 22.0
+
+
+def test_mask_at_threshold_passes() -> None:
+    # 22x22 pixel mask at 1mm spacing -> 22mm == 22mm threshold -> passes
+    arr = np.ones((22, 22), dtype=bool)
+    mask = _make_mask_image(arr, spacing_mm=(1.0, 1.0))
+    # Should NOT raise
+    _check_mask_inscribed_square(mask, required_mm=22.0)
+
+
+def test_mask_above_threshold_with_subpixel_spacing_passes() -> None:
+    # 25x25 pixel mask at 1mm spacing -> 25mm > 22mm
+    arr = np.ones((25, 25), dtype=bool)
+    mask = _make_mask_image(arr, spacing_mm=(1.0, 1.0))
+    _check_mask_inscribed_square(mask, required_mm=22.0)

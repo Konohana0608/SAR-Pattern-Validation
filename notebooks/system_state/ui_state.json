@@ -25,11 +25,11 @@
     "failed_pixel_count": 0,
     "failure_image_path": "/home/ordonez/osparc-services/sar-pattern-validation/notebooks/images/gamma_comparison_image_failures.png",
     "gamma_image_path": "/home/ordonez/osparc-services/sar-pattern-validation/notebooks/images/gamma_comparison_image.png",
-    "input_power_level_dbm": 20.0,
+    "input_power_level_dbm": 10.0,
     "loaded_images_path": null,
     "measured_file_sha256": "025114818bd101b9a506c874ade0e475c9c8b363032870434fa8e51c90760edc",
     "measured_image_path": "/home/ordonez/osparc-services/sar-pattern-validation/notebooks/images/measured_image.png",
-    "measured_pssar": 1.01,
+    "measured_pssar": 10.100000000000001,
     "measured_pssar_at_input_power": 0.101,
     "pass_rate_percent": 100.0,
     "passed_pixel_count": 10138,
@@ -37,9 +37,9 @@
     "reference_image_path": "/home/ordonez/osparc-services/sar-pattern-validation/notebooks/images/reference_image.png",
     "reference_pssar": 10.9141583442688,
     "registered_overlay_path": "/home/ordonez/osparc-services/sar-pattern-validation/notebooks/images/registered_image.png",
-    "scaling_error": -0.9074596530358782
+    "scaling_error": -0.07459653035878178
   },
-  "measured_file_name": "measured_data.csv",
-  "power_level": 20.0,
-  "updated_at_epoch_s": 1777842566.9589438
+  "measured_file_name": "D900_Flat HSL_15 mm_10 dBm_1g_10.csv",
+  "power_level": 10.0,
+  "updated_at_epoch_s": 1777886917.7535837
 }

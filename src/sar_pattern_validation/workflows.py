@@ -92,6 +92,23 @@ def _measurement_area_issue_from_config_error(
     )
 
 
+def _noise_floor_issue_from_config_error(
+    error: ConfigValidationError,
+) -> ValidationIssue | None:
+    text = str(error)
+    if "noise_floor_wkg" not in text:
+        return None
+    return ValidationIssue(
+        severity="error",
+        code=NOISE_FLOOR_OUT_OF_BOUNDS,
+        message=(
+            "Noise floor is out of bounds. "
+            "noise_floor_wkg must satisfy 0 < value <= 10.0 W/kg."
+        ),
+        details={"pydantic_error": text},
+    )
+
+
 def _csv_format_issue_from_error(error: CsvFormatError) -> ValidationIssue:
     raw = str(error).strip() or "CSV could not be parsed."
     return ValidationIssue(
@@ -166,6 +183,48 @@ def _select_registration_mask(
     if _mask_has_active_pixels(support_mask_u8):
         return support_mask_u8, "support"
     return None, "none"
+
+
+def _largest_inscribed_square_mm(mask_u8: sitk.Image) -> float:
+    """Return the side length (mm) of the largest axis-aligned all-True square in *mask_u8*."""
+    arr = sitk.GetArrayFromImage(mask_u8) > 0  # 2D boolean (row, col)
+    if not arr.any():
+        return 0.0
+    rows, cols = arr.shape
+    # Dynamic-programming approach: dp[i][j] = side of largest all-True square
+    # whose bottom-right corner is (i, j).
+    dp = np.zeros((rows, cols), dtype=np.int32)
+    dp[0, :] = arr[0, :]
+    dp[:, 0] = arr[:, 0]
+    for i in range(1, rows):
+        for j in range(1, cols):
+            if arr[i, j]:
+                dp[i, j] = min(dp[i - 1, j], dp[i, j - 1], dp[i - 1, j - 1]) + 1
+            else:
+                dp[i, j] = 0
+    max_side_pixels = int(dp.max())
+    # Convert to mm using spacing (sitk spacing is (x, y) = (col, row)).
+    spacing = mask_u8.GetSpacing()  # (x_spacing_mm, y_spacing_mm)
+    side_mm = max_side_pixels * min(spacing[0], spacing[1])
+    return float(side_mm)
+
+
+def _check_mask_inscribed_square(mask_u8: sitk.Image, *, required_mm: float) -> None:
+    """Raise WorkflowValidationError(MASK_TOO_SMALL) if the mask is too small."""
+    found_mm = _largest_inscribed_square_mm(mask_u8)
+    if found_mm < required_mm:
+        raise WorkflowValidationError(
+            ValidationIssue(
+                severity="error",
+                code=MASK_TOO_SMALL,
+                message=(
+                    f"Gamma evaluation mask is too small. "
+                    f"Required inscribed square: {required_mm:.1f} mm. "
+                    f"Found: {found_mm:.2f} mm."
+                ),
+                details={"required_mm": required_mm, "found_mm": found_mm},
+            )
+        )
 
 
 def _complete_workflow(config: WorkflowConfig) -> WorkflowResult:
@@ -321,6 +380,10 @@ def _complete_workflow(config: WorkflowConfig) -> WorkflowResult:
             policy=config.evaluation_roi_policy,
         )
 
+        # Task 6.6: Verify the evaluation mask has a sufficiently large
+        # inscribed axis-aligned square (10 g cube face = 22 mm side).
+        _check_mask_inscribed_square(reference_mask_u8, required_mm=22.0)
+
         evaluator.compute()
         gamma_map = evaluator.gamma_map
         evaluation_mask = evaluator.evaluation_mask
@@ -372,11 +435,8 @@ def _complete_workflow(config: WorkflowConfig) -> WorkflowResult:
         # TODO(Task 6.7): emit ValidationIssue(code=META_JSON_INVALID, ...)
         # when *.meta.json sidecar parsing lands.
         raise WorkflowValidationError(_csv_format_issue_from_error(exc)) from exc
-    # TODO(Task 6.5): emit ValidationIssue(code=MASK_TOO_SMALL, ...) when the
-    # registration-mask sufficiency check is upgraded to surface a structured
-    # issue instead of falling back silently to the support mask.
-    # TODO(Task 6.3): emit ValidationIssue(code=NOISE_FLOOR_OUT_OF_BOUNDS, ...)
-    # once noise-floor validation lands.
+    except WorkflowValidationError:
+        raise
     except Exception as exc:
         raise WorkflowExecutionError(f"Workflow failed: {exc}") from exc
 
@@ -508,6 +568,12 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Measurement area y dimension (mm). Must be > 22 and <= 400.",
     )
+    parser.add_argument(
+        "--noise_floor_wkg",
+        type=float,
+        default=None,
+        help="User-specified noise floor (W/kg). Must be > 0 and <= 10.0.",
+    )
     parser.add_argument("--log_level", type=str, default=DEFAULT_LOG_LEVEL)
     return parser
 
@@ -560,6 +626,9 @@ def complete_workflow(*args, **kwargs) -> WorkflowResult:
         config = validate_workflow_config(raw_config)
     except ConfigValidationError as exc:
         issue = _measurement_area_issue_from_config_error(exc)
+        if issue is not None:
+            raise WorkflowValidationError(issue) from exc
+        issue = _noise_floor_issue_from_config_error(exc)
         if issue is not None:
             raise WorkflowValidationError(issue) from exc
         raise

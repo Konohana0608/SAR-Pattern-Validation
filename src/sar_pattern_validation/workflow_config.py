@@ -166,6 +166,7 @@ class WorkflowConfig(BaseModel):
         gt=MEASUREMENT_AREA_MIN_MM_EXCLUSIVE,
         le=MEASUREMENT_AREA_MAX_Y_MM,
     )
+    noise_floor_wkg: float | None = Field(default=None, gt=0, le=10.0)
 
     @field_validator("log_level")
     @classmethod

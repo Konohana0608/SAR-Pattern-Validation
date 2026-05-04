@@ -1624,3 +1624,97 @@ def test_runner_extracts_validation_issue_from_error_payload(
 
     assert exc_info.value.validation_issue is not None
     assert exc_info.value.validation_issue["code"] == "CSV_FORMAT_INVALID"
+
+
+# ---------------------------------------------------------------------------
+# Additional ValidationIssue surfacing tests (Task 6.6 — mask, noise floor)
+# ---------------------------------------------------------------------------
+
+
+def test_handle_button_click_surfaces_mask_too_small_validation_issue(
+    sar_ui: SarGammaComparisonUI, tmp_path: Path
+) -> None:
+    issue = {
+        "severity": "error",
+        "code": "MASK_TOO_SMALL",
+        "message": "Gamma evaluation mask is too small. Required inscribed square: 22.0 mm. Found: 15.00 mm.",
+        "details": {"required_mm": 22.0, "found_mm": 15.0},
+    }
+    _run_button_with_validation_issue(
+        sar_ui,
+        reference_path=tmp_path / "reference.csv",
+        issue=issue,
+    )
+
+    assert "MASK_TOO_SMALL" in sar_ui.feedback_banner.value
+    assert "too small" in sar_ui.feedback_banner.value
+    assert sar_ui.run_button.disabled is False
+
+
+def test_handle_button_click_surfaces_noise_floor_validation_issue(
+    sar_ui: SarGammaComparisonUI, tmp_path: Path
+) -> None:
+    issue = {
+        "severity": "error",
+        "code": "NOISE_FLOOR_OUT_OF_BOUNDS",
+        "message": "Noise floor is out of bounds. noise_floor_wkg must satisfy 0 < value <= 10.0 W/kg.",
+        "details": None,
+    }
+    _run_button_with_validation_issue(
+        sar_ui,
+        reference_path=tmp_path / "reference.csv",
+        issue=issue,
+    )
+
+    assert "NOISE_FLOOR_OUT_OF_BOUNDS" in sar_ui.feedback_banner.value
+    assert "out of bounds" in sar_ui.feedback_banner.value
+    assert sar_ui.run_button.disabled is False
+
+
+def test_handle_button_click_re_enables_button_on_validation_issue(
+    sar_ui: SarGammaComparisonUI, tmp_path: Path
+) -> None:
+    """Assert the run button is re-enabled after each failure mode (no hung UI)."""
+    for code in (
+        "CSV_FORMAT_INVALID",
+        "MEASUREMENT_AREA_OUT_OF_BOUNDS",
+        "MASK_TOO_SMALL",
+        "NOISE_FLOOR_OUT_OF_BOUNDS",
+    ):
+        issue = {
+            "severity": "error",
+            "code": code,
+            "message": f"Test failure for {code}",
+            "details": None,
+        }
+        _run_button_with_validation_issue(
+            sar_ui,
+            reference_path=tmp_path / "reference.csv",
+            issue=issue,
+        )
+        assert sar_ui.run_button.disabled is False, f"Button hung for {code}"
+
+
+def test_handle_button_click_clears_progress_on_validation_issue(
+    sar_ui: SarGammaComparisonUI, tmp_path: Path
+) -> None:
+    """Assert the progress output is cleared after each failure mode."""
+    for code in (
+        "CSV_FORMAT_INVALID",
+        "MEASUREMENT_AREA_OUT_OF_BOUNDS",
+        "MASK_TOO_SMALL",
+        "NOISE_FLOOR_OUT_OF_BOUNDS",
+    ):
+        sar_ui.progress_bar.value = 50.0
+        issue = {
+            "severity": "error",
+            "code": code,
+            "message": f"Test failure for {code}",
+            "details": None,
+        }
+        _run_button_with_validation_issue(
+            sar_ui,
+            reference_path=tmp_path / "reference.csv",
+            issue=issue,
+        )
+        assert sar_ui.progress_bar.value == 0.0, f"Progress not cleared for {code}"
