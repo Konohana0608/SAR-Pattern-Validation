@@ -748,3 +748,80 @@ def test_mask_above_threshold_with_subpixel_spacing_passes() -> None:
     arr = np.ones((25, 25), dtype=bool)
     mask = _make_mask_image(arr, spacing_mm=(1.0, 1.0))
     _check_mask_inscribed_square(mask, required_mm=22.0)
+
+
+# ---------------------------------------------------------------------------
+# Negative-path fixture catalog (Task 6.6 §T row 11)
+# Each fixture returns (payload, expected) where expected is the
+# (code, severity, message_substring) triple. These tests verify the
+# fixture catalog stays in sync with the failure modes.
+# ---------------------------------------------------------------------------
+
+
+def test_malformed_csv_path_fixture_returns_expected_tuple(
+    malformed_csv_path: tuple[Path, tuple[str, str, str]],
+) -> None:
+    csv_path, expected = malformed_csv_path
+    code, severity, message_substring = expected
+    assert csv_path.exists()
+    assert code == CSV_FORMAT_INVALID
+    assert severity == "error"
+    assert "CSV format invalid" in message_substring
+
+
+def test_valid_csv_path_fixture_is_parsable_csv(valid_csv_path: Path) -> None:
+    assert valid_csv_path.exists()
+    df = pd.read_csv(valid_csv_path)
+    assert {"x", "y", "sar"}.issubset(df.columns)
+    assert len(df) > 0
+
+
+def test_out_of_bounds_measurement_area_fixture_triggers_expected_issue(
+    out_of_bounds_measurement_area: tuple[dict[str, float], tuple[str, str, str]],
+) -> None:
+    kwargs, expected = out_of_bounds_measurement_area
+    code, severity, message_substring = expected
+    assert code == MEASUREMENT_AREA_OUT_OF_BOUNDS
+    assert severity == "error"
+    with pytest.raises(WorkflowValidationError) as exc_info:
+        complete_workflow(
+            measured_file_path="does/not/exist.csv",
+            reference_file_path="also/missing.csv",
+            **kwargs,
+        )
+    assert exc_info.value.issue.code == code
+    assert exc_info.value.issue.severity == severity
+    assert message_substring in exc_info.value.issue.message
+
+
+def test_out_of_bounds_noise_floor_fixture_triggers_expected_issue(
+    out_of_bounds_noise_floor: tuple[dict[str, float], tuple[str, str, str]],
+) -> None:
+    kwargs, expected = out_of_bounds_noise_floor
+    code, severity, message_substring = expected
+    assert code == NOISE_FLOOR_OUT_OF_BOUNDS
+    assert severity == "error"
+    with pytest.raises(WorkflowValidationError) as exc_info:
+        complete_workflow(
+            measured_file_path="does/not/exist.csv",
+            reference_file_path="also/missing.csv",
+            **kwargs,
+        )
+    assert exc_info.value.issue.code == code
+    assert exc_info.value.issue.severity == severity
+    assert message_substring in exc_info.value.issue.message
+
+
+def test_mask_too_small_workflow_config_fixture_returns_expected_tuple(
+    mask_too_small_workflow_config: tuple[dict[str, object], tuple[str, str, str]],
+) -> None:
+    kwargs, expected = mask_too_small_workflow_config
+    code, severity, message_substring = expected
+    assert code == MASK_TOO_SMALL
+    assert severity == "error"
+    assert "too small" in message_substring
+    # Verify the fixture is well-formed: required keys present, csv files exist
+    assert "measured_file_path" in kwargs
+    assert "reference_file_path" in kwargs
+    assert Path(str(kwargs["measured_file_path"])).exists()
+    assert Path(str(kwargs["reference_file_path"])).exists()
