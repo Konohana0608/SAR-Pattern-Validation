@@ -728,6 +728,10 @@ class SarGammaComparisonUI:
             severity = "error"
         self.workflow_results = None
         self._stop_progress_updater(completed=False)
+        # Clear the progress bar value so it does not linger as a half-filled bar
+        # after a validation issue. The progress output widget is cleared by
+        # _stop_progress_updater above.
+        self.progress_bar.value = 0.0
         self._set_feedback_banner(display_message, severity=severity)
         self.logger.error(display_message)
         self._persist_state()

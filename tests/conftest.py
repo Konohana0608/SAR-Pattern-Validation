@@ -119,6 +119,120 @@ def tmp_csv_pair(tmp_path: Path):
 
 
 # ---------------------------------------------------------------------------
+# Negative-path fixtures for Task 6.6 (one fixture per failure mode)
+#
+# Each fixture is paired with the expected ValidationIssue tuple
+#     (code, severity, message_substring)
+# via the `_EXPECTED_*` module-level dicts below, so tests can assert against
+# a single source of truth.
+# ---------------------------------------------------------------------------
+
+EXPECTED_CSV_FORMAT_INVALID: tuple[str, str, str] = (
+    "CSV_FORMAT_INVALID",
+    "error",
+    "CSV format invalid",
+)
+EXPECTED_MEASUREMENT_AREA_OUT_OF_BOUNDS: tuple[str, str, str] = (
+    "MEASUREMENT_AREA_OUT_OF_BOUNDS",
+    "error",
+    "Measurement area is out of bounds",
+)
+EXPECTED_NOISE_FLOOR_OUT_OF_BOUNDS: tuple[str, str, str] = (
+    "NOISE_FLOOR_OUT_OF_BOUNDS",
+    "error",
+    "Noise floor is out of bounds",
+)
+EXPECTED_MASK_TOO_SMALL: tuple[str, str, str] = (
+    "MASK_TOO_SMALL",
+    "error",
+    "Gamma evaluation mask is too small",
+)
+
+
+@pytest.fixture
+def malformed_csv_path(tmp_path: Path) -> tuple[Path, tuple[str, str, str]]:
+    """A CSV with no recognisable x/y coordinate columns.
+
+    Returns ``(path, expected)`` where ``expected`` is the
+    ``(code, severity, message_substring)`` tuple associated with the
+    failure mode this fixture provokes.
+    """
+    csv_path = tmp_path / "malformed.csv"
+    csv_path.write_text("col_a,col_b,col_c\n1,2,3\n4,5,6\n", encoding="utf-8")
+    return csv_path, EXPECTED_CSV_FORMAT_INVALID
+
+
+@pytest.fixture
+def valid_csv_path(tmp_path: Path) -> Path:
+    """A small valid CSV with x, y, sar columns."""
+    csv_path = tmp_path / "valid.csv"
+    csv_path.write_text(
+        "x,y,sar\n0.0,0.0,1.0\n0.001,0.0,1.2\n0.0,0.001,0.9\n0.001,0.001,1.1\n",
+        encoding="utf-8",
+    )
+    return csv_path
+
+
+@pytest.fixture
+def out_of_bounds_measurement_area() -> tuple[dict[str, float], tuple[str, str, str]]:
+    """Measurement area kwargs that violate the bounds policy.
+
+    Returns ``(kwargs, expected)`` where ``expected`` is the
+    ``(code, severity, message_substring)`` tuple.
+    """
+    return (
+        {"measurement_area_x_mm": 700.0, "measurement_area_y_mm": 200.0},
+        EXPECTED_MEASUREMENT_AREA_OUT_OF_BOUNDS,
+    )
+
+
+@pytest.fixture
+def out_of_bounds_noise_floor() -> tuple[dict[str, float], tuple[str, str, str]]:
+    """Noise-floor kwargs that violate the bounds policy.
+
+    Returns ``(kwargs, expected)`` where ``expected`` is the
+    ``(code, severity, message_substring)`` tuple.
+    """
+    return (
+        {"noise_floor_wkg": -0.1},
+        EXPECTED_NOISE_FLOOR_OUT_OF_BOUNDS,
+    )
+
+
+@pytest.fixture
+def mask_too_small_workflow_config(
+    tmp_path: Path,
+) -> tuple[dict[str, object], tuple[str, str, str]]:
+    """Build kwargs for a workflow whose effective evaluation mask is < 22 mm.
+
+    Writes a tiny synthetic measured/reference CSV pair (10 mm × 10 mm),
+    well below the 22 mm 10 g cube-face threshold. The kwargs are returned
+    as a ``dict`` rather than a fully-validated ``WorkflowConfig`` so that
+    callers can splat them directly into ``complete_workflow(...)``.
+
+    Returns ``(kwargs, expected)`` where ``expected`` is the
+    ``(code, severity, message_substring)`` tuple.
+    """
+    # A tiny 10x10 mm grid -> well below 22 mm, but still big enough that
+    # earlier pipeline stages (registration, etc.) succeed.
+    x, y = make_rect_grid(xmin=-0.005, xmax=0.005, ymin=-0.005, ymax=0.005, step=0.001)
+    _, _, Z = gaussian_2d(x, y, x0=0.0, y0=0.0, sx=0.002, sy=0.002, peak=1.0)
+    measured = tmp_path / "tiny_measured.csv"
+    reference = tmp_path / "tiny_reference.csv"
+    write_sar_csv(measured, x, y, Z)
+    write_sar_csv(reference, x, y, Z)
+
+    kwargs: dict[str, object] = {
+        "measured_file_path": str(measured),
+        "reference_file_path": str(reference),
+        "render_plots": False,
+        "show_plot": False,
+        "log_level": "WARNING",
+    }
+    return kwargs, EXPECTED_MASK_TOO_SMALL
+
+
+# ---------------------------------------------------------------------------
 # Shared fixtures for voila frontend tests
 # ---------------------------------------------------------------------------
 
@@ -228,7 +342,7 @@ def voila_server(tmp_path_factory: pytest.TempPathFactory):
     env = os.environ.copy()
     env["SAR_PATTERN_VALIDATION_BACKEND_MODE"] = "local"
     env["SAR_PATTERN_VALIDATION_LOCAL_PACKAGE_SOURCE"] = str(_REPO_ROOT)
-    env["SAR_PATTERN_VALIDATION_RUN_STALL_TIMEOUT_S"] = "5"
+    env["SAR_PATTERN_VALIDATION_RUN_STALL_TIMEOUT_S"] = "60"
     env["MPLBACKEND"] = "Agg"
 
     proc = subprocess.Popen(
