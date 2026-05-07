@@ -1,6 +1,8 @@
 # Makefile to recreate pyproject.toml using uv commands
 
-.PHONY: create-pyproject clean help tests tests-fast tests-slow tests-cov measurement-validation lint format typecheck setup-pre-commit
+.PHONY: create-pyproject clean help tests tests-fast tests-slow tests-cov measurement-validation lint format typecheck setup-pre-commit voila-smoke-docker voila-test-docker voila-shell-docker kill-voila
+
+JUPYTER_MATH_IMAGE ?= itisfoundation/jupyter-math:3.0.5
 
 # Default target
 help:
@@ -91,3 +93,23 @@ run-pre-commit: setup-pre-commit
 run-pre-commit-all: setup-pre-commit
 	@echo "Running pre-commit hooks on all files..."
 	uv run pre-commit run --all-files
+
+# --------------------------------------------------------------------------
+# Container-first voila harness — runs inside itisfoundation/jupyter-math:3.0.5
+# with the repo bind-mounted. See scripts/voila_docker.sh and
+# scripts/run_in_jupyter_math.sh.
+# --------------------------------------------------------------------------
+
+voila-smoke-docker:
+	JUPYTER_MATH_IMAGE=$(JUPYTER_MATH_IMAGE) ./scripts/voila_docker.sh smoke
+
+voila-test-docker:
+	JUPYTER_MATH_IMAGE=$(JUPYTER_MATH_IMAGE) ./scripts/voila_docker.sh test
+
+voila-shell-docker:
+	JUPYTER_MATH_IMAGE=$(JUPYTER_MATH_IMAGE) ./scripts/voila_docker.sh shell
+
+kill-voila:
+	@docker ps --filter "name=sar-voila-jm-" -q | xargs -r docker kill 2>/dev/null || true
+	@docker ps --filter "ancestor=$(JUPYTER_MATH_IMAGE)" -q | xargs -r docker kill 2>/dev/null || true
+	@echo "kill-voila: done"

@@ -40,3 +40,4 @@ htmlcov/
 *.png
 !assets/*.png
 *.log
+.codex
