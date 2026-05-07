@@ -23,6 +23,7 @@ dependencies = [
 [project.scripts]
 sar-pattern-validation = "sar_pattern_validation.workflow_cli:main"
 sar-pattern-validation-measurement-report = "sar_pattern_validation.measurement_validation_report:main"
+sar-pattern-validation-sample-catalog = "sar_pattern_validation.sample_catalog_cli:main"
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]

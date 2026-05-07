@@ -391,3 +391,70 @@ def test_button_reenables_after_error_run(fresh_voila_page, tmp_path: Path) -> N
             f"after error (elapsed={elapsed:.1f}s). "
             f"Body text:\n{body_text[:1000]}"
         ) from exc
+
+
+# ---------------------------------------------------------------------------
+# Test 4: Late backend validation error must surface (regression for the bug
+# where the progress bar stalled and the backend returned MASK_TOO_SMALL but
+# nothing appeared in the frontend — see plan 'mutable-stargazing-balloon').
+# ---------------------------------------------------------------------------
+
+
+def _write_zero_sar_csv(path: Path) -> None:
+    """Write a structurally-valid SAR CSV whose values are all below the noise
+    floor — the workflow accepts the parse, runs registration, then raises
+    MASK_TOO_SMALL during gamma evaluation. This reproduces the user's
+    'progress stalled, backend responded, UI showed nothing' failure mode."""
+    header = "X [m],Y [m],sSAR10g [W/Kg],Uncertainty [dB]"
+    rows = [header]
+    # 50x50 grid spanning ~60mm × 60mm — large enough to satisfy measurement-area
+    # bounds, but with all-zero SAR so the mask threshold yields effectively
+    # nothing and the inscribed-square check fails.
+    spacing = 0.00125  # 1.25 mm
+    origin_x = 0.0075
+    origin_y = 0.0075
+    for iy in range(50):
+        for ix in range(50):
+            x = origin_x + ix * spacing
+            y = origin_y + iy * spacing
+            rows.append(f"{x:.5f},{y:.5f},0,1.29")
+    path.write_text("\n".join(rows) + "\n", encoding="utf-8")
+
+
+def test_late_backend_validation_error_surfaces_banner(
+    fresh_voila_page, tmp_path: Path
+) -> None:
+    """Regression: when the backend runs for several seconds and then raises a
+    validation error, the banner must appear. Previously the success/failure
+    handlers silently returned if the watchdog or a reset had nulled
+    `_active_run_id`, leaving the UI blank."""
+    page = fresh_voila_page
+
+    zero_csv = tmp_path / "zero_sar_measured.csv"
+    _write_zero_sar_csv(zero_csv)
+
+    _upload_file(page, zero_csv)
+    _select_unique_reference(page)
+    assert _run_button_is_enabled(page), "Run button must be enabled before run"
+
+    page.locator("button:has-text('Compare Patterns')").click()
+    _wait_for_run_button_to_disable(page, timeout_ms=10_000)
+    _wait_for_run_button_to_enable(page, timeout_ms=_RUN_TIMEOUT)
+
+    banner_text = _feedback_banner_text(page)
+    body_text = page.locator("body").inner_text()
+
+    assert banner_text, (
+        "BUG: backend completed but no feedback banner is visible — "
+        "this is exactly the failure mode the user reported.\n"
+        f"Body text:\n{body_text[:1500]}"
+    )
+    assert "Error:" in banner_text or "Warning:" in banner_text, (
+        f"Expected an Error/Warning banner; got: {banner_text!r}"
+    )
+
+    pb = _get_progress_bar_value(page)
+    if pb is not None:
+        assert pb < 1.0 or pb == 0.0, (
+            f"BUG: Progress bar not reset after late validation error (value={pb:.2f})"
+        )

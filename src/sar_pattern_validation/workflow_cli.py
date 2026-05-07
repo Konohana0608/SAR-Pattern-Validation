@@ -9,7 +9,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from sar_pattern_validation.workflows import complete_workflow
+from sar_pattern_validation.workflows import WorkflowValidationError, complete_workflow
 
 _BACKEND_LOG_FILE_ENV = "SAR_PATTERN_VALIDATION_BACKEND_LOG_FILE"
 _LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
@@ -85,7 +85,13 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     except Exception as exc:
-        logging.getLogger(__name__).exception("Workflow execution failed")
+        _logger = logging.getLogger(__name__)
+        if isinstance(exc, WorkflowValidationError):
+            # Expected business-logic error: structured code+message is sufficient,
+            # no need to emit a Python traceback into the backend log / UI widget.
+            _logger.error("Workflow execution failed: %s", exc)
+        else:
+            _logger.exception("Workflow execution failed")
 
         error_body: dict[str, Any] = {
             "type": type(exc).__name__,

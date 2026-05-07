@@ -1,6 +1,10 @@
 # Makefile to recreate pyproject.toml using uv commands
 
-.PHONY: create-pyproject clean help sync tests tests-fast tests-slow tests-cov voila-smoke kill-voila measurement-validation measurement-dashboard measurement-dashboard-open lint format typecheck setup-pre-commit
+.PHONY: create-pyproject clean help sync tests tests-fast tests-slow tests-cov voila-smoke voila-stability-docker voila-shell-docker voila-smoke-docker kill-voila measurement-validation measurement-dashboard measurement-dashboard-open lint format typecheck setup-pre-commit
+
+# Image to run the in-container test/debug loop against. Override on the
+# command line to pin a different version: make voila-stability-docker JUPYTER_MATH_IMAGE=itisfoundation/jupyter-math:3.0.6
+JUPYTER_MATH_IMAGE ?= itisfoundation/jupyter-math:3.0.5
 
 # Default target
 help:
@@ -10,6 +14,9 @@ help:
 	@echo "  tests-slow           - Run only slow tests"
 	@echo "  tests-cov            - Run all tests with coverage report"
 	@echo "  voila-smoke          - Launch Voila against a temp workspace and verify the UI loads"
+	@echo "  voila-stability-docker - Run Playwright stability suite inside itisfoundation/jupyter-math (matches CI/cloud)"
+	@echo "  voila-smoke-docker   - Run run_voila_smoke.py inside itisfoundation/jupyter-math"
+	@echo "  voila-shell-docker   - Drop into bash inside itisfoundation/jupyter-math (manual probing)"
 	@echo "  kill-voila           - Stop stale Voila, smoke-runner, and Voila child kernel processes"
 	@echo "  measurement-validation - Run measurement validation in parallel with xdist"
 	@echo "  measurement-dashboard - Generate single HTML dashboard from per-frequency JSON reports"
@@ -69,6 +76,32 @@ tests-cov:
 voila-smoke:
 	@echo "Running Voila smoke test..."
 	uv run python run_voila_smoke.py
+
+# ----------------------------------------------------------------------------
+# In-container test loop. Spins up $(JUPYTER_MATH_IMAGE) with the repo
+# bind-mounted at the path the cloud uses, runs the same Playwright suite
+# inside that image. Use this when you suspect host-vs-container drift —
+# kernel deaths, pyzmq/tornado ABI mismatches, missing X libs — anything
+# that makes Playwright on the host venv lie about UI state.
+#
+# Optional: target=test_name to filter to a single test.
+#   make voila-stability-docker target=test_late_backend_validation_error_surfaces_banner
+# ----------------------------------------------------------------------------
+voila-stability-docker:
+	@echo "Running voila stability suite inside $(JUPYTER_MATH_IMAGE)..."
+ifdef target
+	./scripts/voila_docker.sh test -k "$(target)"
+else
+	./scripts/voila_docker.sh test
+endif
+
+voila-smoke-docker:
+	@echo "Running voila smoke inside $(JUPYTER_MATH_IMAGE)..."
+	JUPYTER_MATH_IMAGE=$(JUPYTER_MATH_IMAGE) ./scripts/voila_docker.sh smoke
+
+voila-shell-docker:
+	@echo "Opening shell inside $(JUPYTER_MATH_IMAGE)..."
+	JUPYTER_MATH_IMAGE=$(JUPYTER_MATH_IMAGE) ./scripts/voila_docker.sh shell
 
 kill-voila:
 	@echo "Stopping stale Voila process trees..."

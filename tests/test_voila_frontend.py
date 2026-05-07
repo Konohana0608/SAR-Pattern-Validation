@@ -1495,7 +1495,7 @@ def test_load_or_migrate_ui_state_from_legacy_files(tmp_path: Path) -> None:
     assert paths.ui_state_path.exists()
 
 
-def test_notebook_bootstrap_is_thin_and_v2_only() -> None:
+def test_notebook_bootstrap_uses_py39_shim_boundary() -> None:
     notebook = json.loads(Path("notebooks/voila.ipynb").read_text(encoding="utf-8"))
     sources = "\n".join("".join(cell.get("source", [])) for cell in notebook["cells"])
 
@@ -1503,6 +1503,8 @@ def test_notebook_bootstrap_is_thin_and_v2_only() -> None:
     assert "validator(" not in sources
     assert ".dict(" not in sources
     assert "class Config:" not in sources
+    assert "notebook_support" in sources
+    assert "sar_pattern_validation.voila_frontend" not in sources
     assert "bootstrap_voila_ui" in sources
 
 
@@ -1718,3 +1720,91 @@ def test_handle_button_click_clears_progress_on_validation_issue(
             issue=issue,
         )
         assert sar_ui.progress_bar.value == 0.0, f"Progress not cleared for {code}"
+
+
+# ---------------------------------------------------------------------------
+# Defensive UI rendering — late results must always surface (Task: rerun stability)
+# ---------------------------------------------------------------------------
+
+
+def test_failure_handler_renders_when_active_run_id_is_none(
+    sar_ui: SarGammaComparisonUI,
+) -> None:
+    """A late failure dispatch (after _active_run_id was nulled by stall watchdog)
+    must still surface the banner — silent return regressed the user's report."""
+    sar_ui._active_run_id = None
+
+    sar_ui._handle_workflow_failure(
+        message="MASK_TOO_SMALL: example",
+        button=sar_ui.run_button,
+        run_id=42,
+        validation_issue={
+            "severity": "error",
+            "code": "MASK_TOO_SMALL",
+            "message": "Gamma evaluation mask is too small.",
+            "details": None,
+        },
+    )
+
+    assert "MASK_TOO_SMALL" in sar_ui.feedback_banner.value
+    assert "too small" in sar_ui.feedback_banner.value
+    assert sar_ui.progress_bar.value == 0.0
+
+
+def test_success_handler_renders_when_active_run_id_is_none(
+    sar_ui: SarGammaComparisonUI,
+) -> None:
+    """A late success dispatch must still update the results table."""
+    sar_ui._active_run_id = None
+    results = _make_result(pass_rate_percent=100.0, scaling_error=0.0)
+
+    with (
+        patch.object(sar_ui, "_stop_progress_updater"),
+        patch.object(sar_ui, "_persist_state"),
+        patch.object(sar_ui, "update_images"),
+    ):
+        sar_ui._handle_workflow_success(results=results, run_id=99)
+
+    assert sar_ui.workflow_results is results
+    assert "Pass" in sar_ui.results_display.value
+
+
+def test_failure_handler_falls_back_when_set_banner_raises(
+    sar_ui: SarGammaComparisonUI,
+) -> None:
+    """If _set_feedback_banner itself raises, we still render a fallback banner
+    instead of swallowing the exception in the daemon thread."""
+    sar_ui._active_run_id = 7
+
+    with patch.object(
+        sar_ui, "_set_feedback_banner", side_effect=RuntimeError("widget glitch")
+    ):
+        sar_ui._handle_workflow_failure(
+            message="Something went wrong end to end",
+            button=sar_ui.run_button,
+            run_id=7,
+        )
+
+    assert "Something went wrong" in sar_ui.feedback_banner.value
+    assert sar_ui.progress_bar.value == 0.0
+
+
+def test_success_handler_renders_error_banner_when_render_raises(
+    sar_ui: SarGammaComparisonUI,
+) -> None:
+    """If image rendering raises during success, surface an explicit error banner
+    rather than leaving the UI in a half-rendered state."""
+    sar_ui._active_run_id = 11
+    results = _make_result()
+
+    with (
+        patch.object(sar_ui, "_stop_progress_updater"),
+        patch.object(sar_ui, "_persist_state"),
+        patch.object(
+            sar_ui, "update_images", side_effect=RuntimeError("png decoding failed")
+        ),
+    ):
+        sar_ui._handle_workflow_success(results=results, run_id=11)
+
+    assert "UI failed to render results" in sar_ui.feedback_banner.value
+    assert sar_ui.progress_bar.value == 0.0

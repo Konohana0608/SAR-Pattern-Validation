@@ -372,17 +372,20 @@ def voila_server(tmp_path_factory: pytest.TempPathFactory):
             pytest.fail(f"Voila exited early (code {proc.returncode}):\n{out}")
         try:
             with urllib.request.urlopen(base_url + "/", timeout=2) as resp:
-                body = resp.read().decode("utf-8", errors="replace")
-            if "voila" in body.lower() or "jupyter" in body.lower():
-                ready = True
-                break
-        except (urllib.error.URLError, TimeoutError):
+                if resp.status == 200:
+                    ready = True
+                    break
+        except (urllib.error.URLError, TimeoutError, OSError):
             pass
         time.sleep(1)
 
     if not ready:
         proc.terminate()
-        proc.wait(timeout=5)
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
         pytest.fail("Timed out waiting for Voila server to start")
 
     yield base_url, workspace_root

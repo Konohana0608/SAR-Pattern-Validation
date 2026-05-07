@@ -10,8 +10,8 @@ import time
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
-from .models import WorkflowResultPayload
 from .runtime import WorkspacePaths
 
 LOGGER = logging.getLogger(__name__)
@@ -20,13 +20,15 @@ LOGGER = logging.getLogger(__name__)
 class WorkflowExecutionError(RuntimeError):
     """Frontend-safe workflow execution failure."""
 
-    def __init__(self, message: str, *, validation_issue: dict | None = None) -> None:
+    def __init__(
+        self, message: str, validation_issue: dict[str, Any] | None = None
+    ) -> None:
         super().__init__(message)
         self.validation_issue = validation_issue
 
 
 def _install_hint(stdout: str, stderr: str) -> str:
-    combined_output = f"{stdout}\n{stderr}".lower()
+    combined_output = (stdout + "\n" + stderr).lower()
     if "git" not in combined_output:
         return ""
     return (
@@ -36,20 +38,18 @@ def _install_hint(stdout: str, stderr: str) -> str:
     )
 
 
-def _extract_error_message(payload: object) -> str:
+def _extract_error_message(payload: Any) -> str:
     if not isinstance(payload, dict):
         return "Workflow execution failed. Check backend logs for details."
-
     error = payload.get("error")
     if isinstance(error, dict):
         message = str(error.get("message") or "").strip()
         if message:
             return message
-
     return "Workflow execution failed. Check backend logs for details."
 
 
-def _extract_validation_issue(payload: object) -> dict | None:
+def _extract_validation_issue(payload: Any) -> dict[str, Any] | None:
     if not isinstance(payload, dict):
         return None
     error = payload.get("error")
@@ -63,20 +63,18 @@ def _extract_validation_issue(payload: object) -> dict | None:
 
 def _log_backend_stderr(stderr: str) -> None:
     for line in stderr.splitlines():
-        line = line.strip()
-        if line:
-            LOGGER.debug(line)
+        stripped = line.strip()
+        if stripped:
+            LOGGER.debug(stripped)
 
 
 def _stream_backend_log_file(
     backend_log_path: Path,
-    *,
     stop_event: threading.Event,
     on_log_activity: Callable[[], None] | None = None,
 ) -> None:
     last_position = 0
     partial_line = ""
-
     while True:
         if backend_log_path.exists():
             with backend_log_path.open(
@@ -87,7 +85,7 @@ def _stream_backend_log_file(
                 last_position = handle.tell()
             if chunk:
                 combined = partial_line + chunk
-                lines = combined.splitlines(keepends=True)
+                lines = combined.splitlines(True)
                 partial_line = ""
                 for line in lines:
                     if line.endswith("\n") or line.endswith("\r"):
@@ -98,11 +96,9 @@ def _stream_backend_log_file(
                                 on_log_activity()
                     else:
                         partial_line = line
-
         if stop_event.is_set():
             break
         time.sleep(0.2)
-
     if partial_line.strip():
         LOGGER.info("[backend] %s", partial_line.strip())
         if on_log_activity is not None:
@@ -125,7 +121,7 @@ class SarPatternValidationRunner:
     def _backend_log_path(self) -> Path:
         self.paths.system_state_dir.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
-        return self.paths.system_state_dir / f"backend-{timestamp}.log"
+        return self.paths.system_state_dir / ("backend-" + timestamp + ".log")
 
     def backend_source_spec(self) -> str:
         mode = os.getenv("SAR_PATTERN_VALIDATION_BACKEND_MODE", "").strip().lower()
@@ -140,38 +136,64 @@ class SarPatternValidationRunner:
                 "https://github.com/ITISFoundation/SAR-Pattern-Validation",
             )
             branch = os.getenv("BRANCH", "main")
-            return f"git+{package_url}@{branch}"
-
+            return "git+%s@%s" % (package_url, branch)
         if (
             self._has_local_project_checkout()
             and self._should_default_to_local_checkout()
         ):
             return str(self.paths.project_root)
-
         package_url = os.getenv(
             "GITHUB_PACKAGE_URL",
             "https://github.com/ITISFoundation/SAR-Pattern-Validation",
         )
         branch = os.getenv("BRANCH", "main")
-        return f"git+{package_url}@{branch}"
+        return "git+%s@%s" % (package_url, branch)
 
-    def build_command(self, *args: str) -> list[str]:
+    def build_tool_command(self, tool_name: str, *args: str) -> list:
         return [
             "uvx",
             "--no-cache",
             "--from",
             self.backend_source_spec(),
-            "sar-pattern-validation",
-            *args,
-        ]
+            tool_name,
+        ] + list(args)
+
+    def build_command(self, *args: str) -> list:
+        return self.build_tool_command("sar-pattern-validation", *args)
+
+    def load_catalog(self) -> dict[str, Any]:
+        cmd = self.build_tool_command(
+            "sar-pattern-validation-sample-catalog",
+            "--database-path",
+            str(self.paths.database_path),
+        )
+        process = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            env=os.environ.copy(),
+        )
+        try:
+            payload = json.loads(process.stdout)
+        except json.JSONDecodeError as error:
+            raise RuntimeError(
+                "Catalog CLI returned invalid JSON.\n"
+                + "Command: %s\nStdout:\n%s\nStderr:\n%s"
+                % (" ".join(cmd), process.stdout, process.stderr)
+            ) from error
+        if process.returncode != 0:
+            raise RuntimeError(_extract_error_message(payload))
+        catalog = payload.get("catalog")
+        if not isinstance(catalog, dict):
+            raise RuntimeError("Catalog CLI returned an invalid payload.")
+        return catalog
 
     def run_workflow(
         self,
-        *,
         reference_file_path: Path,
         power_level_dbm: float,
         on_log_activity: Callable[[], None] | None = None,
-    ) -> WorkflowResultPayload:
+    ) -> dict[str, Any]:
         cmd = self.build_command(
             "--measured_file_path",
             str(self.paths.measured_file_path),
@@ -207,12 +229,12 @@ class SarPatternValidationRunner:
         log_ctx = contextvars.copy_context()
         log_thread = threading.Thread(
             target=log_ctx.run,
-            args=(_stream_backend_log_file,),
-            kwargs={
-                "backend_log_path": backend_log_path,
-                "stop_event": stop_event,
-                "on_log_activity": on_log_activity,
-            },
+            args=(
+                _stream_backend_log_file,
+                backend_log_path,
+                stop_event,
+                on_log_activity,
+            ),
             daemon=True,
         )
         log_thread.start()
@@ -241,9 +263,9 @@ class SarPatternValidationRunner:
         except json.JSONDecodeError as error:
             message = (
                 "Workflow backend returned an invalid response."
-                " Check backend logs for details."
-                f" Backend log: {backend_log_path}."
-                f"{_install_hint(stdout, stderr)}"
+                + " Check backend logs for details."
+                + " Backend log: %s." % backend_log_path
+                + _install_hint(stdout, stderr)
             )
             LOGGER.error(message)
             raise WorkflowExecutionError(message) from error
@@ -251,20 +273,15 @@ class SarPatternValidationRunner:
         if process.returncode != 0:
             _log_backend_stderr(stderr)
             issue = _extract_validation_issue(payload)
-            if issue is not None:
-                base_message = str(issue.get("message") or "").strip()
-                message = (
-                    base_message or _extract_error_message(payload)
-                ) + f" Backend log: {backend_log_path}."
-                LOGGER.error("Workflow backend validation issue: %s", message)
-                raise WorkflowExecutionError(message, validation_issue=issue)
             message = (
-                f"{_extract_error_message(payload)} Backend log: {backend_log_path}."
+                _extract_error_message(payload) + " Backend log: %s." % backend_log_path
             )
-            LOGGER.error("Workflow backend failed: %s", message)
-            raise WorkflowExecutionError(message)
+            LOGGER.error("Workflow backend validation issue: %s", message)
+            raise WorkflowExecutionError(message, validation_issue=issue)
 
-        _log_backend_stderr(stderr)
-        LOGGER.info("Comparison completed successfully.")
-
-        return WorkflowResultPayload.model_validate(payload["result"])
+        result = payload.get("result")
+        if not isinstance(result, dict):
+            raise WorkflowExecutionError(
+                "Workflow backend returned a malformed success payload."
+            )
+        return result

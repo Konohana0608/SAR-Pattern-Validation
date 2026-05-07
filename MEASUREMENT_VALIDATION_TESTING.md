@@ -178,6 +178,18 @@ REGENERATE_MEASUREMENT_VALIDATION_ARTIFACTS=1 pytest tests/test_measurement_vali
 pytest tests/test_measurement_validation.py -m slow
 ```
 
+If `uv run pytest ...` cannot use the local `.venv`, you can run the same tests through an isolated `uvx` environment with this package installed editable:
+
+```bash
+# Reusable fallback for this repo. pytest-xdist is included because pyproject.toml
+# adds `-n auto --dist worksteal` through pytest addopts.
+uvx --isolated --python 3.12 --from pytest --with pytest-xdist --with-editable . \
+  pytest -q tests/test_notebook_boundary.py
+
+uvx --isolated --python 3.12 --from pytest --with pytest-xdist --with-editable . \
+  pytest -q tests/test_sample_catalog_cli.py
+```
+
 ## Notes
 
 - Test cases are marked with `@pytest.mark.slow` and use xdist for parallel execution
