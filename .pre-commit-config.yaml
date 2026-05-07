@@ -32,6 +32,14 @@ repos:
       - id: ruff-format
         types_or: [python, pyi, jupyter]
 
+  # Strip outputs + execution counts from notebooks. Prevents accidental
+  # commits of large rendered HTML/images and keeps notebook diffs reviewable.
+  - repo: https://github.com/kynan/nbstripout
+    rev: 0.7.1
+    hooks:
+      - id: nbstripout
+        files: \.ipynb$
+
   # Security checks
   - repo: https://github.com/PyCQA/bandit
     rev: 1.9.4

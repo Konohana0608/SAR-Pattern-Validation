@@ -14,6 +14,9 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 IMAGE="${JUPYTER_MATH_IMAGE:-itisfoundation/jupyter-math:3.0.5}"
 WORKSPACE_IN_CONTAINER="/home/jovyan/work/workspace"
 REPO_IN_CONTAINER="$WORKSPACE_IN_CONTAINER/sar-pattern-validation"
+# Forward this port when the user runs `shell` so they can hit Voila from
+# their host browser. Override with VOILA_HOST_PORT=... if 8866 is taken.
+VOILA_HOST_PORT="${VOILA_HOST_PORT:-8866}"
 
 # Persistent caches so reruns aren't paying the 200MB+ chromium download,
 # the uvx resolve cost, or repeated pip downloads every time.
@@ -32,18 +35,27 @@ if [ -t 0 ] && [ -t 1 ]; then INTERACTIVE_FLAGS=(-it); fi
 # dynamic-sidecar env vars and dies under `set -u` when they're unset. We
 # don't need its jupyter-server startup logic — the inner script runs Voila
 # directly.
+# Forward the voila port only for the `shell` subcommand — `test` runs voila
+# bound to 127.0.0.1 inside the container, no host exposure needed.
+PORT_FLAGS=()
+if [ "${1:-test}" = "shell" ]; then
+    PORT_FLAGS=(-p "$VOILA_HOST_PORT:8866")
+fi
+
 exec docker run --rm "${INTERACTIVE_FLAGS[@]}" \
     --name "sar-voila-jm-$$" \
     --user 0 \
     --shm-size=2g \
     --network bridge \
     --entrypoint=bash \
+    "${PORT_FLAGS[@]}" \
     -e HOME=/root \
     -e UV_CACHE_DIR=/root/.cache/uv \
     -e PIP_CACHE_DIR=/root/.cache/pip \
     -e PLAYWRIGHT_BROWSERS_PATH=/root/.cache/ms-playwright \
     -e SAR_PATTERN_VALIDATION_BACKEND_MODE=local \
     -e MPLBACKEND=Agg \
+    -e VOILA_HOST_PORT="$VOILA_HOST_PORT" \
     -e HOST_UID="$(id -u)" \
     -e HOST_GID="$(id -g)" \
     -v "$REPO_ROOT:$REPO_IN_CONTAINER" \

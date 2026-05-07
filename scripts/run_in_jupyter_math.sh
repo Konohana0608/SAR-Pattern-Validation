@@ -4,17 +4,17 @@
 #   /home/jovyan/work/workspace/sar-pattern-validation/   <- repo (bind-mounted)
 #   /home/jovyan/work/workspace/voila.ipynb               <- copy of notebooks/voila.ipynb
 #
-# Production parity:
-#   - The notebook bootstraps its own runtime deps via `notebook_bootstrap.py`
-#     (uv only). The stock python-maths kernel stays on Python 3.9 and the
-#     actual app runs through `uvx` in an isolated env.
-#   - We DO install testing-layer deps (pytest, pytest-playwright, playwright,
-#     pytest-xdist) and the Chromium browser. The user never does these in
-#     production — they're test-harness only.
-#   - Tests run against /home/jovyan/.venv/bin/python so they exercise the same
-#     interpreter the production kernel uses (Python 3.9.x).
+# **Test harness only.** This script does NOT install anything Voila itself
+# needs at runtime. Production parity rule: anything required to run the
+# notebook lives inside the notebook (kernel cells), not here. The only things
+# this script provisions are testing-layer tools the user never has in
+# production:
+#   - apt deps for headless Chromium (Playwright)
+#   - git-lfs (test fixture data)
+#   - pytest / pytest-playwright / pytest-xdist into the kernel venv
+#   - the Chromium browser binary
 #
-# Subcommands: smoke | test [extra pytest args] | shell | exec <cmd...>
+# Subcommands: test [extra pytest args] | shell | exec <cmd...>
 set -euo pipefail
 
 WORKSPACE=/home/jovyan/work/workspace
@@ -42,46 +42,36 @@ if [ "$(id -u)" -eq 0 ]; then
 fi
 
 # --------------------------------------------------------------------------
-# 2. Install uv. The notebook (and `uvx` invocations from it) need uv on PATH.
-# --------------------------------------------------------------------------
-if ! command -v uv >/dev/null 2>&1; then
-    echo ">> install uv"
-    curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh
-fi
-
-# --------------------------------------------------------------------------
-# 3. Notebook-side bootstrap: ensure uv is available to the stock kernel.
-# --------------------------------------------------------------------------
-cd "$REPO"
-echo ">> notebook_bootstrap: ensure uv is available to the kernel"
-PYTHONPATH="$REPO" "$KERNEL_PY" -c "
-import notebook_bootstrap
-notebook_bootstrap.ensure_runtime_environment()
-"
-
-# --------------------------------------------------------------------------
-# 4. Testing-layer deps into the kernel venv. Test-harness only — never
+# 2. Testing-layer deps into the kernel venv. Test-harness only — never
 #    installed in production. Installing them into /home/jovyan/.venv keeps
 #    tests on the same interpreter the production kernel uses.
+#    Uses uv when available; falls back to the kernel venv's pip otherwise
+#    (production has neither — this is solely for the test-harness).
 # --------------------------------------------------------------------------
-echo ">> uv pip install testing-layer deps into $KERNEL_VENV"
-uv pip install --python "$KERNEL_PY" --quiet \
-    pytest pytest-playwright pytest-xdist playwright
+echo ">> install testing-layer deps into $KERNEL_VENV"
+if command -v uv >/dev/null 2>&1; then
+    uv pip install --python "$KERNEL_PY" --quiet \
+        pytest pytest-playwright pytest-xdist playwright
+else
+    "$KERNEL_PY" -m pip install --quiet \
+        pytest pytest-playwright pytest-xdist playwright
+fi
 
 echo ">> playwright install chromium"
 "$KERNEL_VENV/bin/playwright" install chromium
 
 # --------------------------------------------------------------------------
-# 5. git-lfs pull + stage the notebook into the workspace root (mirrors
+# 3. git-lfs pull + stage the notebook into the workspace root (mirrors
 #    copy-notebook in osparc_makefile/Makefile).
 # --------------------------------------------------------------------------
+cd "$REPO"
 git lfs pull >/dev/null 2>&1 || true
 
 mkdir -p "$WORKSPACE"
 cp "$REPO/notebooks/voila.ipynb" "$WORKSPACE/voila.ipynb"
 
 # --------------------------------------------------------------------------
-# 6. Chown bind-mounted files back to host UID/GID on exit so they don't come
+# 4. Chown bind-mounted files back to host UID/GID on exit so they don't come
 #    out root-owned. Only set when HOST_UID/HOST_GID are passed in.
 # --------------------------------------------------------------------------
 if [ -n "${HOST_UID:-}" ] && [ -n "${HOST_GID:-}" ]; then
@@ -89,7 +79,7 @@ if [ -n "${HOST_UID:-}" ] && [ -n "${HOST_GID:-}" ]; then
 fi
 
 # --------------------------------------------------------------------------
-# 7. Make the kernel venv's bin/ first on PATH so subprocesses (voila,
+# 5. Make the kernel venv's bin/ first on PATH so subprocesses (voila,
 #    jupyter, uvx) resolve to the production interpreter. Tests that need to
 #    import the package do so via PYTHONPATH (no install into the kernel).
 # --------------------------------------------------------------------------
@@ -98,27 +88,53 @@ export PATH="$KERNEL_VENV/bin:$PATH"
 export SAR_PATTERN_VALIDATION_PY39_PYTHON="$KERNEL_PY"
 
 # --------------------------------------------------------------------------
-# 8. Dispatch.
+# 6. Dispatch.
 # --------------------------------------------------------------------------
-CMD="${1:-smoke}"
+CMD="${1:-test}"
 shift || true
 case "$CMD" in
-    smoke)
-        echo ">> run_voila_smoke.py"
-        "$KERNEL_PY" run_voila_smoke.py
-        ;;
     test)
         echo ">> running e2e suite (extra args: $*)"
-        "$KERNEL_PY" -m pytest -v -o "addopts=" --run-e2e -p no:xdist \
+        "$KERNEL_PY" -m pytest -v -s -o "addopts=" --run-e2e -p no:xdist \
             tests/test_voila_e2e.py "$@"
         ;;
     shell)
-        echo ">> workspace ready at $WORKSPACE"
-        echo "   repo:        $REPO"
-        echo "   notebook:    $WORKSPACE/voila.ipynb"
-        echo "   kernel py:   $KERNEL_PY"
-        echo "   PYTHONPATH:  $PYTHONPATH"
+        # Spawn voila in the background bound to 0.0.0.0 so the host port
+        # mapping reaches it; print the URL the user should open. Voila keeps
+        # running while the user pokes at the workspace from bash. Trap kills
+        # it on shell exit so we don't leak a zombie.
+        VOILA_PORT_INTERNAL=8866
+        VOILA_LOG="$WORKSPACE/voila-shell.log"
+        echo ">> starting voila on 0.0.0.0:$VOILA_PORT_INTERNAL (log: $VOILA_LOG)"
         cd "$WORKSPACE"
+        "$KERNEL_VENV/bin/voila" voila.ipynb \
+            --no-browser \
+            --Voila.ip=0.0.0.0 \
+            "--port=$VOILA_PORT_INTERNAL" \
+            >"$VOILA_LOG" 2>&1 &
+        VOILA_PID=$!
+        trap 'kill $VOILA_PID 2>/dev/null || true' EXIT
+        # Wait up to 30s for voila to bind the port before announcing.
+        for _i in $(seq 1 30); do
+            if ss -ltn 2>/dev/null | grep -q ":$VOILA_PORT_INTERNAL "; then
+                break
+            fi
+            sleep 1
+        done
+        HOST_PORT="${VOILA_HOST_PORT:-8866}"
+        echo ""
+        echo "============================================================"
+        echo "  voila ready — open in your host browser:"
+        echo ""
+        echo "      http://localhost:$HOST_PORT/"
+        echo ""
+        echo "  workspace:  $WORKSPACE"
+        echo "  notebook:   $WORKSPACE/voila.ipynb"
+        echo "  kernel py:  $KERNEL_PY"
+        echo "  voila log:  $VOILA_LOG  (tail -f to watch)"
+        echo "  exit shell to stop voila"
+        echo "============================================================"
+        echo ""
         bash
         ;;
     exec)
@@ -126,7 +142,7 @@ case "$CMD" in
         ;;
     *)
         echo "unknown subcommand: $CMD" >&2
-        echo "usage: $0 {smoke|test|shell|exec <cmd...>}" >&2
+        echo "usage: $0 {test|shell|exec <cmd...>}" >&2
         exit 2
         ;;
 esac
