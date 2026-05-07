@@ -1,4 +1,5 @@
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -6,6 +7,7 @@ from sar_pattern_validation.report import (
     DEFAULT_TEMPLATE_DIR,
     TEMPLATE_FIGURE_MAPPING,
     _set_latex_macro,
+    compile_report,
     generate_report,
 )
 from sar_pattern_validation.workflow_config import WorkflowConfig
@@ -91,6 +93,7 @@ def test_generate_report_writes_filled_tex_with_all_substitutions(tmp_path: Path
         frequency_mhz=900,
         distance_mm=15,
         mass_g=10,
+        compile_pdf=False,
     )
 
     assert out == tmp_path / "main.tex"
@@ -186,3 +189,73 @@ def test_generate_report_raises_when_template_missing(tmp_path: Path):
             output_dir=tmp_path / "out",
             template_dir=missing_template,
         )
+
+
+def test_compile_report_returns_none_when_pdflatex_missing(tmp_path: Path):
+    tex = tmp_path / "main.tex"
+    tex.write_text(r"\documentclass{article}\begin{document}hi\end{document}")
+    with patch("sar_pattern_validation.report.shutil.which", return_value=None):
+        result = compile_report(tex)
+    assert result is None
+
+
+def test_compile_report_produces_pdf(tmp_path: Path):
+    """End-to-end: compile the real template with the bundled example figures."""
+    import shutil as _shutil
+
+    if not _shutil.which("pdflatex"):
+        pytest.skip("pdflatex not on PATH")
+
+    out_dir = tmp_path / "report"
+    out_dir.mkdir()
+    figures_dir = out_dir / "figures"
+    figures_dir.mkdir()
+
+    tex_src = DEFAULT_TEMPLATE_DIR / "main.tex"
+    _shutil.copy2(tex_src, out_dir / "main.tex")
+    for png in (DEFAULT_TEMPLATE_DIR / "figures").glob("*.png"):
+        _shutil.copy2(png, figures_dir / png.name)
+
+    pdf = compile_report(out_dir / "main.tex")
+    assert pdf is not None
+    assert pdf.suffix == ".pdf"
+    assert pdf.stat().st_size > 1000
+
+
+def test_generate_report_returns_pdf_when_compile_enabled(tmp_path: Path):
+    """generate_report with compile_pdf=True returns .pdf when pdflatex is available."""
+    import shutil as _shutil
+
+    if not _shutil.which("pdflatex"):
+        pytest.skip("pdflatex not on PATH")
+
+    config = WorkflowConfig(
+        measured_file_path="data/example/measured_sSAR1g.csv",
+        reference_file_path="data/example/reference_sSAR1g.csv",
+        power_level_dbm=10.0,
+    )
+    figures_dir = tmp_path / "plots"
+    figures_dir.mkdir()
+    fake_figs = {}
+    for name in TEMPLATE_FIGURE_MAPPING:
+        src = DEFAULT_TEMPLATE_DIR / "figures" / name
+        dest = figures_dir / name
+        _shutil.copy2(src, dest)
+        fake_figs[name] = dest
+
+    result = _make_workflow_result(
+        gamma_image=fake_figs["gamma_index_with_colorbar.png"],
+        failure_image=fake_figs["gamma_failures.png"],
+        overlay=fake_figs["registration_nocolorbar.png"],
+        measured_image=fake_figs["measured_with_colorbar.png"],
+        reference_image=fake_figs["reference_with_colorbar.png"],
+    )
+
+    out = generate_report(
+        workflow_result=result,
+        workflow_config=config,
+        output_dir=tmp_path / "report",
+        compile_pdf=True,
+    )
+    assert out.suffix == ".pdf"
+    assert out.stat().st_size > 1000

@@ -10,12 +10,16 @@ Output path is exposed for [[Task 6.10 - User Report Download Button]] (MEST).
 
 from __future__ import annotations
 
+import logging
 import re
 import shutil
+import subprocess  # nosec B404
 from pathlib import Path
 
 from sar_pattern_validation.workflow_config import WorkflowConfig
 from sar_pattern_validation.workflows import WorkflowResult
+
+LOGGER = logging.getLogger(__name__)
 
 DEFAULT_TEMPLATE_DIR = Path(__file__).resolve().parents[2] / "report_template"
 
@@ -55,6 +59,63 @@ def _latex_escape_filename(name: str) -> str:
     )
 
 
+def compile_report(main_tex: Path) -> Path | None:
+    """
+    Compile *main_tex* to PDF with pdflatex (run twice for stable output).
+
+    pdflatex must be on PATH; if it isn't, logs a warning and returns None so
+    the caller can fall back to distributing the .tex file instead.
+
+    Returns the path to the compiled PDF, or None if compilation is skipped or
+    fails.
+    """
+    if not shutil.which("pdflatex"):
+        LOGGER.warning(
+            "pdflatex not found on PATH — skipping PDF compilation; "
+            "distribute %s instead",
+            main_tex,
+        )
+        return None
+
+    output_dir = main_tex.parent
+    cmd = [
+        "pdflatex",
+        "-interaction=nonstopmode",
+        "-halt-on-error",
+        main_tex.name,
+    ]
+    for _pass in range(2):
+        try:
+            result = subprocess.run(  # nosec B603
+                cmd,
+                cwd=output_dir,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+        except subprocess.TimeoutExpired:
+            LOGGER.error("pdflatex timed out after 120 s")
+            return None
+
+        if result.returncode != 0:
+            LOGGER.error(
+                "pdflatex failed (pass %d/%d, rc=%d):\n%s",
+                _pass + 1,
+                2,
+                result.returncode,
+                result.stdout[-2000:],
+            )
+            return None
+
+    pdf_path = output_dir / main_tex.with_suffix(".pdf").name
+    if not pdf_path.is_file():
+        LOGGER.error("pdflatex exited 0 but %s not found", pdf_path)
+        return None
+
+    LOGGER.info("PDF compiled: %s", pdf_path)
+    return pdf_path
+
+
 def generate_report(
     *,
     workflow_result: WorkflowResult,
@@ -65,20 +126,20 @@ def generate_report(
     frequency_mhz: int = 0,
     distance_mm: int = 0,
     mass_g: int = 0,
+    compile_pdf: bool = True,
 ) -> Path:
     """
     Render the SAR Pattern Validation LaTeX report into ``output_dir``.
 
-    Reads ``template_dir/main.tex`` and substitutes the macros listed in
-    ``TEMPLATE_FIGURE_MAPPING``'s sibling table below. Copies the generated
-    plots into ``output_dir/figures/`` using the filenames the template
-    expects.
+    Reads ``template_dir/main.tex``, substitutes the 13 report macros, and
+    copies the generated plots into ``output_dir/figures/``.
 
-    The .tex output can be compiled to PDF externally (``pdflatex main.tex``);
-    PDF compilation is intentionally not handled here so the module has no
-    LaTeX runtime dependency.
+    When ``compile_pdf=True`` (default) and ``pdflatex`` is on PATH, compiles
+    the .tex to PDF (two passes) and returns the PDF path.  If pdflatex is
+    absent the .tex path is returned instead (graceful degradation).
 
-    Returns the path to the rendered ``main.tex``.
+    Returns the path to the compiled PDF, or to ``main.tex`` when PDF
+    compilation is unavailable.
     """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -122,4 +183,10 @@ def generate_report(
 
     out_path = output_dir / "main.tex"
     out_path.write_text(text, encoding="utf-8")
+
+    if compile_pdf:
+        pdf_path = compile_report(out_path)
+        if pdf_path is not None:
+            return pdf_path
+
     return out_path
