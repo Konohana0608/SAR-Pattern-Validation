@@ -42,3 +42,4 @@ htmlcov/
 *.log
 .codex
 *.zip
+.serena
