@@ -418,6 +418,18 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--plot-dark-axes-facecolor", type=str, default=None)
     parser.add_argument("--plot-light-axes-facecolor", type=str, default=None)
     parser.add_argument("--plot-save-dpi", type=int, default=None)
+    parser.add_argument(
+        "--measurement_area_x_mm",
+        type=float,
+        default=None,
+        help="Measurement area x dimension (mm). Must be > 22 and <= 600.",
+    )
+    parser.add_argument(
+        "--measurement_area_y_mm",
+        type=float,
+        default=None,
+        help="Measurement area y dimension (mm). Must be > 22 and <= 400.",
+    )
     parser.add_argument("--log_level", type=str, default=DEFAULT_LOG_LEVEL)
     return parser
 

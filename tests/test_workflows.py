@@ -107,6 +107,57 @@ def test_validate_workflow_config_rejects_invalid_plotting_config() -> None:
         validate_workflow_config({"plotting": {"save_dpi": 0}})
 
 
+@pytest.mark.parametrize(
+    "x_mm,y_mm",
+    [
+        (22.0, 100.0),  # x at exclusive lower bound
+        (22.0001, 22.0001),  # both individually valid (sentinel handled in body)
+        (601.0, 200.0),  # x above upper bound
+        (300.0, 401.0),  # y above upper bound
+        (None, 100.0),  # only one of the pair set
+        (100.0, None),
+    ],
+)
+def test_validate_workflow_config_rejects_out_of_range_measurement_area(
+    x_mm: float | None, y_mm: float | None
+) -> None:
+    payload: dict[str, float | None] = {}
+    if x_mm is not None:
+        payload["measurement_area_x_mm"] = x_mm
+    if y_mm is not None:
+        payload["measurement_area_y_mm"] = y_mm
+    if x_mm == 22.0001 and y_mm == 22.0001:
+        config = validate_workflow_config(payload)
+        assert config.measurement_area_x_mm == pytest.approx(22.0001)
+        assert config.measurement_area_y_mm == pytest.approx(22.0001)
+        return
+    with pytest.raises(ConfigValidationError):
+        validate_workflow_config(payload)
+
+
+def test_validate_workflow_config_measurement_area_derives_square_window() -> None:
+    config = validate_workflow_config(
+        {"measurement_area_x_mm": 300.0, "measurement_area_y_mm": 200.0}
+    )
+    assert config.measurement_area_x_mm == 300.0
+    assert config.measurement_area_y_mm == 200.0
+    assert config.plotting.window_mm == (-150.0, 150.0, -150.0, 150.0)
+
+
+def test_validate_workflow_config_measurement_area_square_uses_y_when_larger() -> None:
+    config = validate_workflow_config(
+        {"measurement_area_x_mm": 100.0, "measurement_area_y_mm": 400.0}
+    )
+    assert config.plotting.window_mm == (-200.0, 200.0, -200.0, 200.0)
+
+
+def test_validate_workflow_config_no_measurement_area_keeps_default_window() -> None:
+    config = validate_workflow_config({})
+    assert config.measurement_area_x_mm is None
+    assert config.measurement_area_y_mm is None
+    assert config.plotting.window_mm == (-120.0, 120.0, -120.0, 120.0)
+
+
 def test_apply_roi_policy_sets_expected_masks() -> None:
     reference = _make_image(np.ones((8, 8), dtype=np.float32))
     measured = _make_image(np.ones((8, 8), dtype=np.float32))
