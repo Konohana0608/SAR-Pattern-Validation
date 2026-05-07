@@ -212,10 +212,6 @@ def test_run_button_is_disabled_on_fresh_load(voila_page) -> None:
     _log("<< test_run_button_is_disabled_on_fresh_load: pass")
 
 
-@pytest.mark.skip(
-    reason="requires Phase B port: filter ToggleButton grid (button_groups) "
-    "is constructed in the notebook but never displayed at startup on main-melanie"
-)
 def test_filter_toggle_buttons_are_visible(voila_page) -> None:
     _log(">> test_filter_toggle_buttons_are_visible")
     count = voila_page.locator(".widget-toggle-button").count()
@@ -237,10 +233,6 @@ def test_file_upload_button_is_present(voila_page) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(
-    reason="requires Phase B port: filter ToggleButton grid not displayed on main-melanie "
-    "(see test_filter_toggle_buttons_are_visible)"
-)
 def test_clicking_filter_button_activates_it(voila_page) -> None:
     _log(">> test_clicking_filter_button_activates_it")
     voila_page.locator(".widget-toggle-button").first.click()
@@ -257,10 +249,6 @@ def test_file_upload_updates_filename_label(voila_page) -> None:
     _log("<< test_file_upload_updates_filename_label: pass")
 
 
-@pytest.mark.skip(
-    reason="requires Phase B port: filter ToggleButton grid is what enables the "
-    "run button; without the grid being displayed, run button never enables"
-)
 def test_run_button_enables_after_upload_and_unique_filter(voila_page) -> None:
     """Clicks filter buttons until exactly one reference matches; asserts run is enabled."""
     _log(">> test_run_button_enables_after_upload_and_unique_filter")
