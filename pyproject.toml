@@ -16,6 +16,12 @@ dependencies = [
     "simpleitk>=2.2.1",
 ]
 
+[project.optional-dependencies]
+e2e = [
+    "pytest-playwright>=0.5",
+    "playwright>=1.40",
+]
+
 [project.scripts]
 sar-pattern-validation = "sar_pattern_validation.workflow_cli:main"
 
@@ -66,6 +72,7 @@ addopts = "-n auto --dist worksteal"
 markers = [
     "slow: mark test as relatively slow",
     "integration: mark test as integration",
+    "e2e: end-to-end Playwright test against a live voila server (gated by --run-e2e; run with -p no:xdist)",
 ]
 
 [tool.coverage.run]
