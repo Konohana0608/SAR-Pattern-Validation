@@ -1,9 +1,9 @@
 """End-to-end Playwright tests for the Voila UI.
 
 Run inside the jupyter-math container via:
-    make voila-test-docker
+    make test-voila-e2e
 
-Manual repro inside `make voila-shell-docker`:
+Manual repro inside `make serve-voila`, then:
     /home/jovyan/.venv/bin/python -m pytest -v -s -o "addopts=" \\
         --run-e2e -p no:xdist tests/test_voila_e2e.py::<name>
 
