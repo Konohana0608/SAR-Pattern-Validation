@@ -27,11 +27,13 @@ DOM notes (ipywidgets 8.x + voila 0.5):
 
 from __future__ import annotations
 
+import contextlib
 import re
 import time
 from pathlib import Path
 
 import pytest
+from attr import dataclass
 
 pytest.importorskip("playwright")
 
@@ -116,6 +118,11 @@ def _ensure_run_button_enabled(voila_page) -> None:
     _log(f"   found {count} toggle buttons; will click until run button enables")
     run_btn = voila_page.locator("button:has-text('Compare Patterns')")
 
+    _FIND_RUN_BTN = (
+        "() => [...document.querySelectorAll('button')]"
+        ".find(b => b.textContent.includes('Compare Patterns'))"
+    )
+
     for i in range(count):
         if run_btn.get_attribute("disabled") is None:
             _log(f"<< ensure_run_button_enabled: enabled after {i} toggle clicks")
@@ -125,6 +132,14 @@ def _ensure_run_button_enabled(voila_page) -> None:
             _log(f"   clicking toggle {i}/{count}")
             btn.click()
             voila_page.wait_for_timeout(500)
+
+    # check_settings polls every 1 s; wait up to 2 s for it to fire after the
+    # last click before falling through to the asserting failure message.
+    with contextlib.suppress(Exception):
+        voila_page.wait_for_function(
+            f"() => {{ const b = ({_FIND_RUN_BTN})(); return b && !b.disabled; }}",
+            timeout=2_000,
+        )
 
     assert run_btn.get_attribute("disabled") is None, (
         "Run button should be enabled once a measured file and unique reference are selected"
@@ -156,7 +171,15 @@ def _wait_for_workflow_cycle(voila_page, timeout_ms: int = 120_000) -> None:
     _log("<< wait_for_workflow_cycle: complete")
 
 
-def _extract_pssar_row_values(page_html: str) -> tuple[float, float, float, float]:
+@dataclass
+class PSSARRowValues:
+    measured_value: float
+    measured_30dbm: float
+    reference_value: float
+    scaling_error: float
+
+
+def _extract_pssar_row_values(page_html: str) -> PSSARRowValues:
     _log(">> extract_pssar_row_values: scanning page HTML")
     match = re.search(
         (
@@ -172,7 +195,12 @@ def _extract_pssar_row_values(page_html: str) -> tuple[float, float, float, floa
         flags=re.S,
     )
     assert match is not None, "Could not extract the measured-value cell from the page."
-    values = tuple(float(match.group(index)) for index in range(1, 5))
+    values = PSSARRowValues(
+        measured_value=float(match.group(1)),
+        measured_30dbm=float(match.group(2)),
+        reference_value=float(match.group(3)),
+        scaling_error=float(match.group(4)),
+    )
     _log(f"<< extract_pssar_row_values: {values}")
     return values
 
@@ -212,10 +240,6 @@ def test_run_button_is_disabled_on_fresh_load(voila_page) -> None:
     _log("<< test_run_button_is_disabled_on_fresh_load: pass")
 
 
-@pytest.mark.skip(
-    reason="requires Phase B port: filter ToggleButton grid (button_groups) "
-    "is constructed in the notebook but never displayed at startup on main-melanie"
-)
 def test_filter_toggle_buttons_are_visible(voila_page) -> None:
     _log(">> test_filter_toggle_buttons_are_visible")
     count = voila_page.locator(".widget-toggle-button").count()
@@ -237,10 +261,6 @@ def test_file_upload_button_is_present(voila_page) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(
-    reason="requires Phase B port: filter ToggleButton grid not displayed on main-melanie "
-    "(see test_filter_toggle_buttons_are_visible)"
-)
 def test_clicking_filter_button_activates_it(voila_page) -> None:
     _log(">> test_clicking_filter_button_activates_it")
     voila_page.locator(".widget-toggle-button").first.click()
@@ -257,10 +277,6 @@ def test_file_upload_updates_filename_label(voila_page) -> None:
     _log("<< test_file_upload_updates_filename_label: pass")
 
 
-@pytest.mark.skip(
-    reason="requires Phase B port: filter ToggleButton grid is what enables the "
-    "run button; without the grid being displayed, run button never enables"
-)
 def test_run_button_enables_after_upload_and_unique_filter(voila_page) -> None:
     """Clicks filter buttons until exactly one reference matches; asserts run is enabled."""
     _log(">> test_run_button_enables_after_upload_and_unique_filter")
@@ -314,9 +330,7 @@ def test_restored_session_rerun_updates_results_after_power_change(voila_page) -
         _log("   no prior results in DOM — running once to seed state")
         run_btn.click()
         _wait_for_workflow_cycle(voila_page)
-    first_measured_value, first_measured_30dbm, _, first_scaling_error = (
-        _extract_pssar_row_values(voila_page.content())
-    )
+    first_values = _extract_pssar_row_values(voila_page.content())
 
     _log(f"   reloading page (timeout={_KERNEL_TIMEOUT}ms)")
     voila_page.reload(timeout=_KERNEL_TIMEOUT)
@@ -326,12 +340,16 @@ def test_restored_session_rerun_updates_results_after_power_change(voila_page) -
         timeout=15_000,
     )
 
-    restored_measured_value, restored_measured_30dbm, _, restored_scaling_error = (
-        _extract_pssar_row_values(voila_page.content())
+    restored_values = _extract_pssar_row_values(voila_page.content())
+    assert restored_values.measured_value == pytest.approx(
+        first_values.measured_value, abs=0.01
     )
-    assert restored_measured_value == pytest.approx(first_measured_value, abs=0.01)
-    assert restored_measured_30dbm == pytest.approx(first_measured_30dbm, abs=0.01)
-    assert restored_scaling_error == pytest.approx(first_scaling_error, abs=0.01)
+    assert restored_values.measured_30dbm == pytest.approx(
+        first_values.measured_30dbm, abs=0.01
+    )
+    assert restored_values.scaling_error == pytest.approx(
+        first_values.scaling_error, abs=0.01
+    )
 
     _set_power_level(voila_page, 10.0)
     run_btn = voila_page.locator("button:has-text('Compare Patterns')")
@@ -341,17 +359,21 @@ def test_restored_session_rerun_updates_results_after_power_change(voila_page) -
     run_btn.click()
     voila_page.wait_for_function(
         "(expected) => !document.body.innerText.includes(expected)",
-        arg=f"{first_measured_30dbm:.2f} W/kg",
+        arg=f"{first_values.measured_30dbm:.2f} W/kg",
         timeout=10_000,
     )
 
-    second_measured_value, second_measured_30dbm, _, second_scaling_error = (
-        _extract_pssar_row_values(voila_page.content())
-    )
+    second_values = _extract_pssar_row_values(voila_page.content())
     assert run_btn.get_attribute("disabled") is None
-    assert second_measured_value == pytest.approx(first_measured_value, abs=0.01)
-    assert second_measured_30dbm != pytest.approx(first_measured_30dbm, abs=0.01)
-    assert second_scaling_error != pytest.approx(first_scaling_error, abs=0.01)
+    assert second_values.measured_value == pytest.approx(
+        first_values.measured_value, abs=0.01
+    )
+    assert second_values.measured_30dbm != pytest.approx(
+        first_values.measured_30dbm, abs=0.01
+    )
+    assert second_values.scaling_error != pytest.approx(
+        first_values.scaling_error, abs=0.01
+    )
     _log("<< test_restored_session_rerun_updates_results_after_power_change: pass")
 
 
@@ -363,26 +385,28 @@ def test_same_session_rerun_updates_results_after_power_change(voila_page) -> No
     run_btn = voila_page.locator("button:has-text('Compare Patterns')")
     assert run_btn.get_attribute("disabled") is None
 
-    first_measured_value, first_measured_30dbm, _, first_scaling_error = (
-        _extract_pssar_row_values(voila_page.content())
-    )
+    first_values = _extract_pssar_row_values(voila_page.content())
 
     _set_power_level(voila_page, 17.0)
     _log("   clicking Compare Patterns after power change")
     run_btn.click()
     voila_page.wait_for_function(
         "(expected) => !document.body.innerText.includes(expected)",
-        arg=f"{first_measured_30dbm:.2f} W/kg",
+        arg=f"{first_values.measured_30dbm:.2f} W/kg",
         timeout=10_000,
     )
 
-    second_measured_value, second_measured_30dbm, _, second_scaling_error = (
-        _extract_pssar_row_values(voila_page.content())
-    )
+    second_values = _extract_pssar_row_values(voila_page.content())
     assert run_btn.get_attribute("disabled") is None
-    assert second_measured_value == pytest.approx(first_measured_value, abs=0.01)
-    assert second_measured_30dbm != pytest.approx(first_measured_30dbm, abs=0.01)
-    assert second_scaling_error != pytest.approx(first_scaling_error, abs=0.01)
+    assert second_values.measured_value == pytest.approx(
+        first_values.measured_value, abs=0.01
+    )
+    assert second_values.measured_30dbm != pytest.approx(
+        first_values.measured_30dbm, abs=0.01
+    )
+    assert second_values.scaling_error != pytest.approx(
+        first_values.scaling_error, abs=0.01
+    )
     _log("<< test_same_session_rerun_updates_results_after_power_change: pass")
 
 

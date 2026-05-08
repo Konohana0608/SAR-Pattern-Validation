@@ -110,10 +110,6 @@ jobs:
   e2e-tests:
     name: E2E (Voila + Playwright)
     runs-on: ubuntu-latest
-    needs:
-      - fast-tests
-    # Allowed to fail until the harness is proven stable on CI hardware.
-    continue-on-error: true
     container:
       image: itisfoundation/jupyter-math:3.0.5
     env:
@@ -152,7 +148,7 @@ jobs:
         shell: bash
         run: /home/jovyan/.venv/bin/playwright install chromium
 
-      - name: Run minimal voila e2e suite
+      - name: Run voila e2e suite
         shell: bash
         env:
           PYTHONPATH: ${{ github.workspace }}
