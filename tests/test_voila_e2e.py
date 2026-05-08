@@ -27,6 +27,7 @@ DOM notes (ipywidgets 8.x + voila 0.5):
 
 from __future__ import annotations
 
+import contextlib
 import re
 import time
 from pathlib import Path
@@ -116,6 +117,11 @@ def _ensure_run_button_enabled(voila_page) -> None:
     _log(f"   found {count} toggle buttons; will click until run button enables")
     run_btn = voila_page.locator("button:has-text('Compare Patterns')")
 
+    _FIND_RUN_BTN = (
+        "() => [...document.querySelectorAll('button')]"
+        ".find(b => b.textContent.includes('Compare Patterns'))"
+    )
+
     for i in range(count):
         if run_btn.get_attribute("disabled") is None:
             _log(f"<< ensure_run_button_enabled: enabled after {i} toggle clicks")
@@ -125,6 +131,14 @@ def _ensure_run_button_enabled(voila_page) -> None:
             _log(f"   clicking toggle {i}/{count}")
             btn.click()
             voila_page.wait_for_timeout(500)
+
+    # check_settings polls every 1 s; wait up to 2 s for it to fire after the
+    # last click before falling through to the asserting failure message.
+    with contextlib.suppress(Exception):
+        voila_page.wait_for_function(
+            f"() => {{ const b = ({_FIND_RUN_BTN})(); return b && !b.disabled; }}",
+            timeout=2_000,
+        )
 
     assert run_btn.get_attribute("disabled") is None, (
         "Run button should be enabled once a measured file and unique reference are selected"
