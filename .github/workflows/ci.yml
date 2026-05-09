@@ -155,7 +155,7 @@ jobs:
         run: |
           /home/jovyan/.venv/bin/python -m pytest -v -o "addopts=" \
             --run-e2e -p no:xdist \
-            --screenshot only-on-failure \
+            --screenshot on \
             --video on \
             --tracing retain-on-failure \
             --output /tmp/playwright-results \

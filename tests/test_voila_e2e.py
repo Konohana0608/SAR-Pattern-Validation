@@ -28,6 +28,7 @@ DOM notes (ipywidgets 8.x + voila 0.5):
 from __future__ import annotations
 
 import contextlib
+import os
 import re
 import time
 from pathlib import Path
@@ -86,6 +87,32 @@ def voila_page(playwright, voila_server):
     context.close()
     browser.close()
     _log("<< voila_page: teardown complete")
+
+
+@pytest.fixture(autouse=True)
+def _capture_final_screenshot(request, voila_page):
+    """Save a PNG of the final browser state after every test (pass and fail).
+
+    Artifacts land in PLAYWRIGHT_ARTIFACTS_DIR (set by the test-harness script)
+    or fall back to ``test-artifacts/playwright/`` relative to the repo root.
+    File is named after the test function so it's unambiguous in CI and local
+    review.
+    """
+    yield
+    artifacts_dir = Path(
+        os.environ.get(
+            "PLAYWRIGHT_ARTIFACTS_DIR",
+            str(_REPO_ROOT / "test-artifacts" / "playwright"),
+        )
+    )
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    safe_name = re.sub(r"[^\w-]", "_", request.node.name)
+    screenshot_path = artifacts_dir / f"{safe_name}.png"
+    try:
+        voila_page.screenshot(path=str(screenshot_path), full_page=True)
+        _log(f"   screenshot → {screenshot_path}")
+    except Exception as exc:  # noqa: BLE001
+        _log(f"   screenshot failed: {exc}")
 
 
 # ---------------------------------------------------------------------------
