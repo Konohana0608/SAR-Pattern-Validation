@@ -460,6 +460,67 @@ def test_exact_repeat_shows_warning_without_rerunning(voila_page) -> None:
     _log("<< test_exact_repeat_shows_warning_without_rerunning: pass")
 
 
+def test_new_run_clears_plots_before_results_appear(voila_page) -> None:
+    """Verify that plots are hidden immediately when a new (non-cached) run starts."""
+    _log(">> test_new_run_clears_plots_before_results_appear")
+    _ensure_run_button_enabled(voila_page)
+    run_btn = voila_page.locator("button:has-text('Compare Patterns')")
+
+    if "Pass rate" not in voila_page.locator("body").inner_text():
+        _log("   no prior results — running once to seed state")
+        run_btn.click()
+        _wait_for_workflow_cycle(voila_page)
+
+    _FIND_BTN = (
+        "() => [...document.querySelectorAll('button')]"
+        ".find(b => b.textContent.includes('Compare Patterns'))"
+    )
+    # Images with actual data are hidden when offsetParent is null (display:none on parent box)
+    _ALL_DATA_IMAGES_HIDDEN = (
+        "() => {"
+        "  const imgs = Array.from(document.querySelectorAll('.widget-image img'))"
+        "    .filter(img => img.src && img.src.length > 100);"
+        "  return imgs.length > 0 && imgs.every(img => img.offsetParent === null);"
+        "}"
+    )
+    _SOME_DATA_IMAGES_VISIBLE = (
+        "() => {"
+        "  const imgs = Array.from(document.querySelectorAll('.widget-image img'))"
+        "    .filter(img => img.src && img.src.length > 100);"
+        "  return imgs.length > 0 && imgs.some(img => img.offsetParent !== null);"
+        "}"
+    )
+
+    # 3.0 dBm is not used by any other test, so this is guaranteed to be a new run
+    _set_power_level(voila_page, 3.0)
+
+    _log("   clicking Compare Patterns")
+    run_btn.click()
+
+    _log("   waiting for run button to become disabled (run started)")
+    voila_page.wait_for_function(
+        f"() => {{ const b = ({_FIND_BTN})(); return b && b.disabled; }}",
+        timeout=10_000,
+    )
+    # Both the button-disable and layout.display="none" comm messages are dispatched in the
+    # same kernel turn, so a short wait is enough for the frontend to apply them.
+    voila_page.wait_for_timeout(500)
+
+    _log("   asserting images are hidden while run is in progress")
+    assert voila_page.evaluate(_ALL_DATA_IMAGES_HIDDEN), (
+        "Images should be hidden immediately when a new run starts"
+    )
+
+    _log("   waiting for run to complete")
+    _wait_for_workflow_cycle(voila_page)
+
+    _log("   asserting images are visible again after run completes")
+    assert voila_page.evaluate(_SOME_DATA_IMAGES_VISIBLE), (
+        "Images should be visible again after the run completes"
+    )
+    _log("<< test_new_run_clears_plots_before_results_appear: pass")
+
+
 def test_uploading_new_data_clears_prior_results(voila_page, tmp_path: Path) -> None:
     _log(">> test_uploading_new_data_clears_prior_results")
     replacement_csv = tmp_path / "replacement_measured.csv"

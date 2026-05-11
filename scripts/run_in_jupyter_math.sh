@@ -95,7 +95,7 @@ shift || true
 case "$CMD" in
     test)
         echo ">> running e2e suite (extra args: $*)"
-        ARTIFACTS_DIR="$REPO/test-artifacts/playwright"
+        ARTIFACTS_DIR="$REPO/tests/artifacts/playwright"
         mkdir -p "$ARTIFACTS_DIR"
         echo ">> playwright artifacts → $ARTIFACTS_DIR"
         export PLAYWRIGHT_ARTIFACTS_DIR="$ARTIFACTS_DIR"
