@@ -64,8 +64,8 @@ jobs:
       - name: Install git-lfs and pull example data
         shell: bash
         run: |
-          apt-get update && apt-get install -y --no-install-recommends git-lfs
-          git lfs install
+          apt-get update && apt-get install -y --no-install-recommends git-lfs || true
+          git lfs install --skip-repo
           git lfs pull --include="data/example/**"
 
       - name: Sync dependencies
