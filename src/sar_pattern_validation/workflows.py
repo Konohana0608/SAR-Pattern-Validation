@@ -479,7 +479,7 @@ def _normalize_plotting_config(raw_config: dict[str, Any]) -> dict[str, Any]:
     if plotting is None:
         plotting = {}
     elif is_dataclass(plotting):
-        plotting = asdict(plotting)  # type: ignore
+        plotting = asdict(plotting)
     elif hasattr(plotting, "items"):
         plotting = dict(plotting.items())
     else:
