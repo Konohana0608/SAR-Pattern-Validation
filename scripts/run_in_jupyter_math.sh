@@ -32,7 +32,7 @@ if [ "$(id -u)" -eq 0 ]; then
     echo ">> apt-get install playwright deps + tooling"
     apt-get update -qq
     apt-get install -y --no-install-recommends \
-        curl ca-certificates git-lfs procps tree \
+        curl ca-certificates git-lfs procps tree ffmpeg \
         libnss3 libnspr4 libdbus-1-3 libatk1.0-0 libatk-bridge2.0-0 \
         libcups2 libxkbcommon0 libatspi2.0-0 libx11-6 libxcomposite1 \
         libxdamage1 libxext6 libxfixes3 libxrandr2 libgbm1 libasound2 \
@@ -95,7 +95,14 @@ shift || true
 case "$CMD" in
     test)
         echo ">> running e2e suite (extra args: $*)"
+        ARTIFACTS_DIR="$REPO/test-artifacts/playwright"
+        mkdir -p "$ARTIFACTS_DIR"
+        echo ">> playwright artifacts → $ARTIFACTS_DIR"
+        export PLAYWRIGHT_ARTIFACTS_DIR="$ARTIFACTS_DIR"
         "$KERNEL_PY" -m pytest -v -s -o "addopts=" --run-e2e -p no:xdist \
+            --video on \
+            --tracing retain-on-failure \
+            --output "$ARTIFACTS_DIR" \
             tests/test_voila_e2e.py "$@"
         ;;
     shell)

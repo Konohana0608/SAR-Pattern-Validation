@@ -1,6 +1,6 @@
 # Makefile to recreate pyproject.toml using uv commands
 
-.PHONY: create-pyproject clean help tests tests-fast tests-slow tests-cov measurement-validation lint format typecheck setup-pre-commit voila-test-docker voila-shell-docker kill-voila
+.PHONY: create-pyproject clean help tests tests-fast tests-slow tests-cov measurement-validation lint format typecheck setup-pre-commit test-voila-e2e serve-voila kill-voila
 
 JUPYTER_MATH_IMAGE ?= itisfoundation/jupyter-math:3.0.5
 
@@ -100,10 +100,10 @@ run-pre-commit-all: setup-pre-commit
 # scripts/run_in_jupyter_math.sh.
 # --------------------------------------------------------------------------
 
-voila-test-docker:
+test-voila-e2e:
 	JUPYTER_MATH_IMAGE=$(JUPYTER_MATH_IMAGE) ./scripts/voila_docker.sh test
 
-voila-shell-docker:
+serve-voila:
 	JUPYTER_MATH_IMAGE=$(JUPYTER_MATH_IMAGE) ./scripts/voila_docker.sh shell
 
 kill-voila:
