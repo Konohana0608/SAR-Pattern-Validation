@@ -31,6 +31,7 @@ from sar_pattern_validation.workflow_config import (
     DEFAULT_PLOT_FIGURE_FACECOLOR,
     DEFAULT_PLOT_FONT_SIZE,
     DEFAULT_PLOT_LIGHT_AXES_FACECOLOR,
+    DEFAULT_PLOT_NOT_EVALUATED_COLOR,
     DEFAULT_PLOT_SAVE_DPI,
     DEFAULT_PLOT_WINDOW_MM,
     DEFAULT_POWER_LEVEL_DBM,
@@ -66,6 +67,9 @@ class PlottingConfigSchema(BaseModel):
     dark_axes_facecolor: str = DEFAULT_PLOT_DARK_AXES_FACECOLOR
     light_axes_facecolor: str = DEFAULT_PLOT_LIGHT_AXES_FACECOLOR
     save_dpi: int = Field(default=DEFAULT_PLOT_SAVE_DPI, gt=0)
+    not_evaluated_color: str = DEFAULT_PLOT_NOT_EVALUATED_COLOR
+    measurement_area_x_mm: float | None = None
+    measurement_area_y_mm: float | None = None
 
     @field_validator("single_figure_size", "combined_figure_size")
     @classmethod
@@ -174,7 +178,11 @@ class WorkflowConfigSchema(BaseModel):
             side = max(x, y)
             half = side / 2.0
             self.plotting = self.plotting.model_copy(
-                update={"window_mm": (-half, half, -half, half)}
+                update={
+                    "window_mm": (-half, half, -half, half),
+                    "measurement_area_x_mm": x,
+                    "measurement_area_y_mm": y,
+                }
             )
         return self
 

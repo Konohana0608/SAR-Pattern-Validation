@@ -42,6 +42,7 @@ DEFAULT_PLOT_FIGURE_FACECOLOR: Final[str] = "white"
 DEFAULT_PLOT_DARK_AXES_FACECOLOR: Final[str] = "black"
 DEFAULT_PLOT_LIGHT_AXES_FACECOLOR: Final[str] = "white"
 DEFAULT_PLOT_SAVE_DPI: Final[int] = 200
+DEFAULT_PLOT_NOT_EVALUATED_COLOR: Final[str] = "lightgray"
 
 ROI_POLICY_CHOICES: Final[tuple[str, ...]] = ("reference_only", "intersection", "none")
 EvaluationRoiPolicy = Literal["reference_only", "intersection", "none"]
@@ -83,6 +84,9 @@ class PlottingConfig:
     dark_axes_facecolor: str = DEFAULT_PLOT_DARK_AXES_FACECOLOR
     light_axes_facecolor: str = DEFAULT_PLOT_LIGHT_AXES_FACECOLOR
     save_dpi: int = DEFAULT_PLOT_SAVE_DPI
+    not_evaluated_color: str = DEFAULT_PLOT_NOT_EVALUATED_COLOR
+    measurement_area_x_mm: float | None = None
+    measurement_area_y_mm: float | None = None
 
 
 @dataclass
