@@ -82,7 +82,7 @@ jobs:
           uv run pytest -v -m "slow or validation" \
             --basetemp=test-artifacts \
             --ignore=tests/test_measurement_validation.py \
-            --cov=src/sar_pattern_validation --cov-report=xml:coverage-validation.xml --cov-report=term
+            --cov=src/sar_pattern_validation --cov-report=xml:coverage-validation.xml --cov-report=term \
             tests/
 
       - name: Upload slow coverage artifact
