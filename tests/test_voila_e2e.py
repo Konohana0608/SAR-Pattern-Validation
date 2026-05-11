@@ -213,19 +213,22 @@ class PSSARRowValues:
 
 def _extract_pssar_row_values(page_html: str) -> PSSARRowValues:
     _log(">> extract_pssar_row_values: scanning page HTML")
+    # New two-table layout: result badge | measured@power | measured@30dBm | reference@30dBm | scaling_error | criteria
     match = re.search(
-        r"<b>sSAR \[W/kg\]</b></td>"
-        r"\s*<td[^>]*>([0-9.]+)</td>"  # reference 30 dBm
-        r"\s*<td[^>]*>([0-9.]+)</td>"  # measured 30 dBm
-        r"\s*<td[^>]*>([-0-9.]+)</td>",  # scaling error [%]
+        r"Reference, 30 dBm</th>.*?"  # anchor on header
+        r"(?:Pass|Fail).*?</td>"  # skip result badge cell
+        r"\s*<td[^>]*>[\d.]+\s*W/kg</td>"  # skip measured@input_power
+        r"\s*<td[^>]*>([\d.]+)\s*W/kg</td>"  # measured@30dBm
+        r"\s*<td[^>]*>([\d.]+)\s*W/kg</td>"  # reference@30dBm
+        r"\s*<td[^>]*>([-\d.]+)</td>",  # scaling error [%]
         page_html,
         flags=re.S,
     )
     assert match is not None, "Could not extract result table values from page."
     values = PSSARRowValues(
-        measured_value=float(match.group(2)),  # measured 30 dBm
-        measured_30dbm=float(match.group(2)),
-        reference_value=float(match.group(1)),  # reference 30 dBm
+        measured_value=float(match.group(1)),  # measured 30 dBm
+        measured_30dbm=float(match.group(1)),
+        reference_value=float(match.group(2)),  # reference 30 dBm
         scaling_error=float(match.group(3)),  # scaling error [%]
     )
     _log(f"<< extract_pssar_row_values: {values}")
@@ -335,7 +338,7 @@ def test_run_workflow_and_check_results_table(voila_page) -> None:
     assert "Traceback" not in body_text, (
         f"Python traceback in page:\n{body_text[:3000]}"
     )
-    assert "Reference 30 dBm" in page_html, (
+    assert "Reference, 30 dBm" in page_html, (
         f"Result table not found.\nBody text:\n{body_text[:3000]}\n\nPage HTML tail:\n{page_html[-2000:]}"
     )
     assert "Pass rate" in body_text, (
@@ -351,7 +354,7 @@ def test_restored_session_rerun_updates_results_after_power_change(voila_page) -
     _log(">> test_restored_session_rerun_updates_results_after_power_change")
     _ensure_run_button_enabled(voila_page)
     run_btn = voila_page.locator("button:has-text('Compare Patterns')")
-    if "Reference 30 dBm" not in voila_page.content():
+    if "Reference, 30 dBm" not in voila_page.content():
         _log("   no prior results in DOM — running once to seed state")
         run_btn.click()
         _wait_for_workflow_cycle(voila_page)
@@ -365,7 +368,7 @@ def test_restored_session_rerun_updates_results_after_power_change(voila_page) -
         timeout=15_000,
     )
     voila_page.wait_for_function(
-        "() => document.body.innerText.includes('Reference 30 dBm')",
+        "() => document.body.innerText.includes('Reference, 30 dBm')",
         timeout=15_000,
     )
 
@@ -455,8 +458,8 @@ def test_exact_repeat_shows_warning_without_rerunning(voila_page) -> None:
     )
 
     assert run_btn.get_attribute("disabled") is None
-    assert "Reference 30 dBm" in previous_html
-    assert "Reference 30 dBm" in voila_page.content()
+    assert "Reference, 30 dBm" in previous_html
+    assert "Reference, 30 dBm" in voila_page.content()
     _log("<< test_exact_repeat_shows_warning_without_rerunning: pass")
 
 
@@ -465,15 +468,15 @@ def test_uploading_new_data_clears_prior_results(voila_page, tmp_path: Path) -> 
     replacement_csv = tmp_path / "replacement_measured.csv"
     replacement_csv.write_text("x,y,sar\n0,0,2\n1,1,3\n", encoding="utf-8")
 
-    assert "Reference 30 dBm" in voila_page.content()
+    assert "Reference, 30 dBm" in voila_page.content()
     _upload_file(voila_page, replacement_csv)
     _log("   waiting for result table to disappear from DOM")
     voila_page.wait_for_function(
-        "() => !document.body.innerHTML.includes('Reference 30 dBm')",
+        "() => !document.body.innerHTML.includes('Reference, 30 dBm')",
         timeout=10_000,
     )
 
     page_html = voila_page.content()
-    assert "Reference 30 dBm" not in page_html
-    assert "sSAR" not in page_html
+    assert "Reference, 30 dBm" not in page_html
+    assert "psSAR" not in page_html
     _log("<< test_uploading_new_data_clears_prior_results: pass")
