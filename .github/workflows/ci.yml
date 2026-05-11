@@ -68,6 +68,7 @@ jobs:
           apt-get download git-lfs
           dpkg -x git-lfs_*.deb /tmp/git-lfs-pkg
           find /tmp/git-lfs-pkg -name git-lfs -type f -exec install -m755 {} /usr/local/bin/git-lfs \;
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git lfs install
           git lfs pull --include="data/example/**"
 
@@ -143,8 +144,6 @@ jobs:
             libcups2 libxkbcommon0 libatspi2.0-0 libx11-6 libxcomposite1 \
             libxdamage1 libxext6 libxfixes3 libxrandr2 libgbm1 libasound2 \
             libpangocairo-1.0-0 libpango-1.0-0 libcairo2 fonts-liberation
-          git lfs install --force || true
-          git lfs pull || true
 
       - name: Install uv
         shell: bash
