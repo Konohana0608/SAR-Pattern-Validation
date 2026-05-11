@@ -10,6 +10,12 @@ from unittest.mock import patch
 import pytest
 
 from sar_pattern_validation.workflow_cli import main
+from sar_pattern_validation.workflow_schema import validate_workflow_config
+from sar_pattern_validation.workflows import (
+    NOISE_FLOOR_OUT_OF_BOUNDS,
+    WorkflowValidationError,
+    complete_workflow,
+)
 
 
 @pytest.mark.slow
@@ -426,3 +432,59 @@ def test_cli_via_uvx_like_frontend(tmp_path: Path) -> None:
     assert registered_image_path.exists(), "Registered overlay image should be saved"
     assert measured_image_path.exists(), "Measured image should be saved"
     assert reference_image_path.exists(), "Reference image should be saved"
+
+
+# ---------------------------------------------------------------------------
+# Noise floor integration tests
+# ---------------------------------------------------------------------------
+
+
+def _make_noise_floor_kwargs(
+    measured_file: str, reference_file: str, noise_floor_wkg: float
+) -> dict:
+    return {
+        "measured_file_path": measured_file,
+        "reference_file_path": reference_file,
+        "power_level_dbm": 23.0,
+        "noise_floor_wkg": noise_floor_wkg,
+        "render_plots": False,
+    }
+
+
+def test_noise_floor_wkg_above_max_raises(tmp_path: Path) -> None:
+    """noise_floor_wkg=0.11 exceeds the 0.1 W/kg maximum and must raise."""
+    kwargs = _make_noise_floor_kwargs(
+        str(tmp_path / "m.csv"), str(tmp_path / "r.csv"), noise_floor_wkg=0.11
+    )
+    with pytest.raises(WorkflowValidationError) as exc_info:
+        complete_workflow(**kwargs)
+    assert exc_info.value.issue.code == NOISE_FLOOR_OUT_OF_BOUNDS
+    assert "0.1" in exc_info.value.issue.message
+
+
+def test_noise_floor_wkg_negative_raises(tmp_path: Path) -> None:
+    """noise_floor_wkg=-0.01 is below zero and must raise."""
+    kwargs = _make_noise_floor_kwargs(
+        str(tmp_path / "m.csv"), str(tmp_path / "r.csv"), noise_floor_wkg=-0.01
+    )
+    with pytest.raises(WorkflowValidationError) as exc_info:
+        complete_workflow(**kwargs)
+    assert exc_info.value.issue.code == NOISE_FLOOR_OUT_OF_BOUNDS
+
+
+def test_noise_floor_wkg_zero_accepted(tmp_path: Path) -> None:
+    """noise_floor_wkg=0.0 is at the lower bound: config validation must accept it."""
+    raw = _make_noise_floor_kwargs(
+        str(tmp_path / "m.csv"), str(tmp_path / "r.csv"), noise_floor_wkg=0.0
+    )
+    config = validate_workflow_config(raw)
+    assert config.noise_floor_wkg == 0.0
+
+
+def test_noise_floor_wkg_at_max_accepted(tmp_path: Path) -> None:
+    """noise_floor_wkg=0.1 is at the upper bound: config validation must accept it."""
+    raw = _make_noise_floor_kwargs(
+        str(tmp_path / "m.csv"), str(tmp_path / "r.csv"), noise_floor_wkg=0.1
+    )
+    config = validate_workflow_config(raw)
+    assert config.noise_floor_wkg == pytest.approx(0.1)

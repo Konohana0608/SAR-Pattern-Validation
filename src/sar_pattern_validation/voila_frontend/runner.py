@@ -170,6 +170,7 @@ class SarPatternValidationRunner:
         *,
         reference_file_path: Path,
         power_level_dbm: float,
+        noise_floor_wkg: float = 0.05,
         on_log_activity: Callable[[], None] | None = None,
     ) -> WorkflowResultPayload:
         cmd = self.build_command(
@@ -189,6 +190,8 @@ class SarPatternValidationRunner:
             str(self.paths.gamma_comparison_path),
             "--power_level_dbm",
             str(power_level_dbm),
+            "--noise_floor_wkg",
+            str(noise_floor_wkg),
         )
         env = os.environ.copy()
         env["MPLBACKEND"] = "agg"

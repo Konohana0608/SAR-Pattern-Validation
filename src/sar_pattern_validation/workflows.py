@@ -103,7 +103,7 @@ def _noise_floor_issue_from_config_error(
         code=NOISE_FLOOR_OUT_OF_BOUNDS,
         message=(
             "Noise floor is out of bounds. "
-            "noise_floor_wkg must satisfy 0 < value <= 10.0 W/kg."
+            "noise_floor_wkg must satisfy 0 <= value <= 0.1 W/kg."
         ),
         details={"pydantic_error": text},
     )

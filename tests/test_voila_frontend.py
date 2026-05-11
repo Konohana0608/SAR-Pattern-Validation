@@ -994,6 +994,7 @@ class TestSarGammaComparisonUI:
             *,
             reference_file_path: Path,
             power_level_dbm: float,
+            noise_floor_wkg: float = 0.05,
             on_log_activity=None,
         ):
             assert sar_ui.workflow_results is None
@@ -1659,7 +1660,7 @@ def test_handle_button_click_surfaces_noise_floor_validation_issue(
     issue = {
         "severity": "error",
         "code": "NOISE_FLOOR_OUT_OF_BOUNDS",
-        "message": "Noise floor is out of bounds. noise_floor_wkg must satisfy 0 < value <= 10.0 W/kg.",
+        "message": "Noise floor is out of bounds. noise_floor_wkg must satisfy 0 <= value <= 0.1 W/kg.",
         "details": None,
     }
     _run_button_with_validation_issue(
@@ -1808,3 +1809,146 @@ def test_success_handler_renders_error_banner_when_render_raises(
 
     assert "UI failed to render results" in sar_ui.feedback_banner.value
     assert sar_ui.progress_bar.value == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Noise floor widget tests
+# ---------------------------------------------------------------------------
+
+
+class TestNoiseFloorWidget:
+    def test_noise_floor_widget_present_with_bounds(
+        self, sar_ui: SarGammaComparisonUI
+    ) -> None:
+        import ipywidgets as widgets
+
+        assert isinstance(sar_ui.noise_floor_wkg, widgets.BoundedFloatText)
+        assert sar_ui.noise_floor_wkg.min == 0.0
+        assert sar_ui.noise_floor_wkg.max == 0.1
+
+    def test_noise_floor_widget_default_value(
+        self, sar_ui: SarGammaComparisonUI
+    ) -> None:
+        from sar_pattern_validation.workflow_config import DEFAULT_NOISE_FLOOR
+
+        assert sar_ui.noise_floor_wkg.value == DEFAULT_NOISE_FLOOR
+
+    def test_noise_floor_persisted_in_state(self, sar_ui: SarGammaComparisonUI) -> None:
+        sar_ui.noise_floor_wkg.value = 0.03
+        state = sar_ui._build_state()
+        assert abs(state.noise_floor_wkg - 0.03) < 1e-12
+
+    def test_noise_floor_restored_from_state(
+        self, sar_ui: SarGammaComparisonUI
+    ) -> None:
+        from sar_pattern_validation.voila_frontend.models import UiState
+        from sar_pattern_validation.voila_frontend.state import save_ui_state
+
+        state = UiState(noise_floor_wkg=0.07)
+        save_ui_state(sar_ui.paths, state)
+
+        with patch.object(sar_ui, "update_images"):
+            sar_ui.restore_state()
+
+        assert abs(sar_ui.noise_floor_wkg.value - 0.07) < 1e-12
+
+    def test_noise_floor_change_triggers_persist(
+        self, sar_ui: SarGammaComparisonUI
+    ) -> None:
+        with patch.object(sar_ui, "_persist_state") as mock_persist:
+            sar_ui.noise_floor_wkg.value = 0.08
+            mock_persist.assert_called()
+
+    def test_noise_floor_passed_to_runner_on_run(
+        self, sar_ui: SarGammaComparisonUI, tmp_path: Path
+    ) -> None:
+        sar_ui.paths.measured_file_path.parent.mkdir(parents=True, exist_ok=True)
+        sar_ui.paths.measured_file_path.write_bytes(b"x,y,sar\n0,0,1\n")
+        sar_ui.noise_floor_wkg.value = 0.06
+
+        captured: dict = {}
+
+        def _capture_call(
+            *,
+            reference_file_path: Path,
+            power_level_dbm: float,
+            noise_floor_wkg: float = 0.05,
+            on_log_activity=None,
+        ):
+            captured["noise_floor_wkg"] = noise_floor_wkg
+            return _make_result()
+
+        with (
+            patch.object(sar_ui, "_start_progress_updater"),
+            patch.object(sar_ui, "_start_stall_watchdog"),
+            patch.object(sar_ui, "_stop_progress_updater"),
+            patch(
+                "sar_pattern_validation.voila_frontend.ui.threading.Thread",
+                _ImmediateThread,
+            ),
+            patch.object(
+                type(sar_ui.radio_button_grid),
+                "selected_reference_path",
+                new_callable=PropertyMock,
+                return_value=tmp_path / "reference.csv",
+            ),
+            patch.object(sar_ui.runner, "run_workflow", side_effect=_capture_call),
+            patch.object(sar_ui, "_persist_state"),
+        ):
+            sar_ui.handle_button_click(sar_ui.run_button)
+
+        assert abs(captured["noise_floor_wkg"] - 0.06) < 1e-12
+
+    def test_noise_floor_result_matches_current_inputs_respects_noise_floor(
+        self, sar_ui: SarGammaComparisonUI, tmp_path: Path
+    ) -> None:
+        measured_bytes = b"x,y,sar\n0,0,1\n"
+        sar_ui.paths.measured_file_path.parent.mkdir(parents=True, exist_ok=True)
+        sar_ui.paths.measured_file_path.write_bytes(measured_bytes)
+        sha = hashlib.sha256(measured_bytes).hexdigest()
+        reference_path = tmp_path / "ref.csv"
+
+        result = _make_result(
+            input_power_level_dbm=23.0,
+            reference_file_path=str(reference_path),
+            measured_file_sha256=sha,
+            input_noise_floor_wkg=0.05,
+        )
+        # write required output files so _restore_outputs_available returns True
+        for attr in (
+            "reference_image_path",
+            "measured_image_path",
+            "aligned_means_path",
+            "aligned_means_colorbar_path",
+            "registered_image_path",
+            "gamma_comparison_path",
+            "gamma_comparison_colorbar_path",
+            "gamma_comparison_failures_path",
+        ):
+            _write_png(getattr(sar_ui.paths, attr))
+
+        sar_ui.noise_floor_wkg.value = 0.05
+        assert sar_ui._result_matches_current_inputs(result, reference_path)
+
+        sar_ui.noise_floor_wkg.value = 0.08
+        assert not sar_ui._result_matches_current_inputs(result, reference_path)
+
+    def test_handle_button_click_surfaces_noise_floor_validation_issue_new_bounds(
+        self, sar_ui: SarGammaComparisonUI, tmp_path: Path
+    ) -> None:
+        issue = {
+            "severity": "error",
+            "code": "NOISE_FLOOR_OUT_OF_BOUNDS",
+            "message": "Noise floor is out of bounds. noise_floor_wkg must satisfy 0 <= value <= 0.1 W/kg.",
+            "details": None,
+        }
+        _run_button_with_validation_issue(
+            sar_ui,
+            reference_path=tmp_path / "reference.csv",
+            issue=issue,
+        )
+
+        assert "NOISE_FLOOR_OUT_OF_BOUNDS" in sar_ui.feedback_banner.value
+        # HTML escapes < and > — check for the encoded form
+        assert "0 &lt;= value &lt;= 0.1" in sar_ui.feedback_banner.value
+        assert sar_ui.run_button.disabled is False

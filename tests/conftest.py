@@ -118,6 +118,82 @@ def tmp_csv_pair(tmp_path: Path):
     return str(measured), str(reference)
 
 
+_DEMO_RUN_DIR = Path(__file__).resolve().parent / "fixtures" / "demo_run"
+_DEMO_REFERENCE_FILE = "dipole_1450MHz_Flat_10mm_10g.csv"
+
+
+@pytest.fixture
+def workspace_with_database(tmp_path: Path):
+    """Workspace whose project_root symlinks to the repo, giving access to real DB."""
+    from sar_pattern_validation.voila_frontend.runtime import WorkspacePaths
+
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    (workspace_root / "sar-pattern-validation").symlink_to(_REPO_ROOT)
+    paths = WorkspacePaths.from_workspace(workspace_root)
+    paths.ensure_runtime_dirs()
+    return paths
+
+
+@pytest.fixture
+def completed_workspace(tmp_path: Path):
+    """Workspace pre-populated with a real completed run (images + result payload)."""
+    import json
+
+    from sar_pattern_validation.voila_frontend.models import WorkflowResultPayload
+    from sar_pattern_validation.voila_frontend.runtime import WorkspacePaths
+
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    (workspace_root / "sar-pattern-validation").symlink_to(_REPO_ROOT)
+    paths = WorkspacePaths.from_workspace(workspace_root)
+    paths.ensure_runtime_dirs()
+
+    shutil.copytree(_DEMO_RUN_DIR / "images", paths.images_dir, dirs_exist_ok=True)
+    shutil.copy2(
+        _DEMO_RUN_DIR / "uploaded_data" / "measured_data.csv",
+        paths.measured_file_path,
+    )
+
+    raw = json.loads((_DEMO_RUN_DIR / "result.json").read_text())
+    raw.pop("reference_file", None)
+    raw.pop("measured_sha256", None)
+    for path_field in (
+        "gamma_image_path",
+        "failure_image_path",
+        "registered_overlay_path",
+        "reference_image_path",
+        "measured_image_path",
+        "aligned_measured_path",
+    ):
+        raw[path_field] = None
+
+    import hashlib
+
+    reference_path = paths.project_root / "data" / "database" / _DEMO_REFERENCE_FILE
+    sha = hashlib.sha256(paths.measured_file_path.read_bytes()).hexdigest()
+    payload = WorkflowResultPayload.model_validate(raw)
+    payload = payload.model_copy(
+        update={
+            "reference_file_path": str(reference_path),
+            "measured_file_sha256": sha,
+        }
+    )
+    return paths, payload
+
+
+@pytest.fixture
+def sar_ui(workspace_with_database):
+    """SarGammaComparisonUI with display + prerequisites mocked out."""
+    from sar_pattern_validation.voila_frontend.ui import SarGammaComparisonUI
+
+    with (
+        patch("sar_pattern_validation.voila_frontend.ui.ensure_notebook_prerequisites"),
+        patch("sar_pattern_validation.voila_frontend.ui.display"),
+    ):
+        yield SarGammaComparisonUI(paths=workspace_with_database)
+
+
 # ---------------------------------------------------------------------------
 # Negative-path fixtures for Task 6.6 (one fixture per failure mode)
 #

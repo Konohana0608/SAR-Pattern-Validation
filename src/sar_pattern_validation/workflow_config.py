@@ -12,6 +12,7 @@ DEFAULT_MEASURED_FILE_PATH: Final[str] = "measured.csv"
 DEFAULT_REFERENCE_FILE_PATH: Final[str] = "reference.csv"
 DEFAULT_POWER_LEVEL_DBM: Final[float] = 30.0
 DEFAULT_NOISE_FLOOR: Final[float] = 0.05
+NOISE_FLOOR_MAX_WKG: Final[float] = 0.1
 DEFAULT_SHOW_PLOT: Final[bool] = False
 DEFAULT_RENDER_PLOTS: Final[bool] = True
 DEFAULT_DOSE_TO_AGREEMENT: Final[float] = 5.0
@@ -166,7 +167,7 @@ class WorkflowConfig(BaseModel):
         gt=MEASUREMENT_AREA_MIN_MM_EXCLUSIVE,
         le=MEASUREMENT_AREA_MAX_Y_MM,
     )
-    noise_floor_wkg: float | None = Field(default=None, gt=0, le=10.0)
+    noise_floor_wkg: float | None = Field(default=None, ge=0, le=NOISE_FLOOR_MAX_WKG)
 
     @field_validator("log_level")
     @classmethod

@@ -24,6 +24,10 @@ from sar_pattern_validation.sample_catalog import (
     DatabaseSampleFilterOption,
     DatabaseSampleFilters,
 )
+from sar_pattern_validation.workflow_config import (
+    DEFAULT_NOISE_FLOOR,
+    NOISE_FLOOR_MAX_WKG,
+)
 
 from .models import UiState, WorkflowResultPayload
 from .runner import SarPatternValidationRunner
@@ -384,6 +388,7 @@ class SarGammaComparisonUI:
         return UiState(
             measured_file_name=self.uploaded_file_name_label.value,
             power_level=float(self.power_level.value),
+            noise_floor_wkg=float(self.noise_floor_wkg.value),
             active_filters=self.radio_button_grid.filter_options,
             last_result=self.workflow_results,
         )
@@ -400,6 +405,11 @@ class SarGammaComparisonUI:
             return
         self._persist_state()
         self._refresh_run_button_state()
+
+    def _on_noise_floor_change(self, change: Bunch) -> None:
+        if change["name"] != "value":
+            return
+        self._persist_state()
 
     def _measured_file_sha256(self) -> str | None:
         if not self.paths.measured_file_path.exists():
@@ -424,9 +434,16 @@ class SarGammaComparisonUI:
             return False
         if results is None or results.input_power_level_dbm is None:
             return False
-        return abs(
-            float(results.input_power_level_dbm) - float(self.power_level.value)
-        ) < (1e-9)
+        if (
+            abs(float(results.input_power_level_dbm) - float(self.power_level.value))
+            >= 1e-9
+        ):
+            return False
+        # If result predates the noise_floor field, skip that check (backward compat)
+        return results.input_noise_floor_wkg is None or (
+            abs(results.input_noise_floor_wkg - float(self.noise_floor_wkg.value))
+            < 1e-12
+        )
 
     def _recalculate_results_for_power(
         self, results: WorkflowResultPayload, *, power_level_dbm: float
@@ -637,26 +654,30 @@ class SarGammaComparisonUI:
         button: widgets.Button,
         reference_path: Path,
         power_level_dbm: float,
+        noise_floor_wkg: float,
         measured_file_sha256: str | None,
         run_id: int,
     ) -> None:
         self.logger.info(
-            "Workflow worker thread started: run_id=%s reference=%s power=%.2f dBm",
+            "Workflow worker thread started: run_id=%s reference=%s power=%.2f dBm noise_floor=%.4f W/kg",
             run_id,
             reference_path,
             power_level_dbm,
+            noise_floor_wkg,
         )
         try:
             try:
                 results = self.runner.run_workflow(
                     reference_file_path=reference_path,
                     power_level_dbm=power_level_dbm,
+                    noise_floor_wkg=noise_floor_wkg,
                     on_log_activity=lambda: self._mark_run_activity(run_id),
                 )
                 results = results.model_copy(
                     update={
                         "reference_file_path": str(reference_path),
                         "measured_file_sha256": measured_file_sha256,
+                        "input_noise_floor_wkg": noise_floor_wkg,
                     }
                 )
                 self.logger.info(
@@ -870,6 +891,8 @@ class SarGammaComparisonUI:
                 raise RuntimeError("Select exactly one reference configuration.")
             rerun_candidate = self.workflow_results
             measured_file_sha256 = self._measured_file_sha256()
+            # Snapshot widget values before any thread dispatch
+            noise_floor_wkg = float(self.noise_floor_wkg.value)
             if self._result_matches_current_inputs(rerun_candidate, reference_path):
                 self._set_feedback_banner(_EXACT_REPEAT_WARNING, severity="warning")
                 self.logger.warning(_EXACT_REPEAT_WARNING)
@@ -910,6 +933,7 @@ class SarGammaComparisonUI:
                 reference_path=reference_path,
                 measured_file_sha256=measured_file_sha256,
                 power_level_dbm=float(self.power_level.value),
+                noise_floor_wkg=noise_floor_wkg,
                 run_id=run_id,
             )
             return
@@ -923,6 +947,7 @@ class SarGammaComparisonUI:
             reference_path,
             measured_file_sha256,
             float(self.power_level.value),
+            noise_floor_wkg,
             run_id,
         )
 
@@ -932,6 +957,7 @@ class SarGammaComparisonUI:
         reference_path: Path,
         measured_file_sha256: str | None,
         power_level_dbm: float,
+        noise_floor_wkg: float,
         run_id: int,
     ) -> None:
         import contextvars
@@ -948,6 +974,7 @@ class SarGammaComparisonUI:
                     "button": button,
                     "reference_path": reference_path,
                     "power_level_dbm": power_level_dbm,
+                    "noise_floor_wkg": noise_floor_wkg,
                     "measured_file_sha256": measured_file_sha256,
                     "run_id": run_id,
                 },
@@ -1061,6 +1088,7 @@ class SarGammaComparisonUI:
 
         self.uploaded_file_name_label.value = state.measured_file_name
         self.power_level.value = state.power_level
+        self.noise_floor_wkg.value = state.noise_floor_wkg
         self.radio_button_grid.apply_filters(state.active_filters)
         self.workflow_results = state.last_result
         if self.workflow_results is not None and self._restore_outputs_available():
@@ -1193,6 +1221,15 @@ class SarGammaComparisonUI:
             style={"description_width": "initial"},
         )
         self.power_level.observe(self._on_power_level_change, names="value")
+        self.noise_floor_wkg = widgets.BoundedFloatText(
+            value=DEFAULT_NOISE_FLOOR,
+            min=0.0,
+            max=NOISE_FLOOR_MAX_WKG,
+            step=0.001,
+            description="noise floor [W/kg]:",
+            style={"description_width": "initial"},
+        )
+        self.noise_floor_wkg.observe(self._on_noise_floor_change, names="value")
         self.uploaded_file_name_label = widgets.Label(value="")
 
         tooltip = widgets.HTML(
@@ -1216,6 +1253,7 @@ class SarGammaComparisonUI:
                     [
                         flex_item(self.upload_1, "1"),
                         flex_item(self.power_level, "1", "150px"),
+                        flex_item(self.noise_floor_wkg, "1", "180px"),
                     ]
                 ),
                 self.uploaded_file_name_label,
