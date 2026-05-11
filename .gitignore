@@ -43,3 +43,4 @@ htmlcov/
 .codex
 *.zip
 .serena
+.claude
