@@ -477,14 +477,10 @@ class SARImageLoader:
         ):
             return
 
-        y_ipk, x_ipk = np.unravel_index(np.argmax(meas_unit), meas_unit.shape)
-        x_meas_shift = x_meas - x_meas[x_ipk]
-        y_meas_shift = y_meas - y_meas[y_ipk]
-
         plot_sar_image(
             sar_image=meas_unit,
-            x_axis_m=x_meas_shift,
-            y_axis_m=y_meas_shift,
+            x_axis_m=x_meas,
+            y_axis_m=y_meas,
             title="Measured, Normalized",
             xlabel="$x_e$ (mm)",
             ylabel="$y_e$ (mm)",
@@ -514,14 +510,14 @@ class SARImageLoader:
         arr_min = float(np.nanmin(aligned_arr))
         arr_max = float(np.nanmax(aligned_arr))
         aligned_unit = (aligned_arr - arr_min) / max(arr_max - arr_min, 1e-12)
-        x_ref, y_ref = self._reference_axes_m
+        x_meas, y_meas = self._measured_axes_m
         plot_sar_image(
             sar_image=aligned_unit,
-            x_axis_m=x_ref,
-            y_axis_m=y_ref,
-            title="Measured, After Registration",
-            xlabel="$x'_e$ (mm)",
-            ylabel="$y'_e$ (mm)",
+            x_axis_m=x_meas,
+            y_axis_m=y_meas,
+            title="Simulated, After Registration",
+            xlabel="$x_e$ (mm)",
+            ylabel="$y_e$ (mm)",
             save_path=aligned_meas_save_path,
             show_colorbar=True,
             plotting_config=plotting_config,
