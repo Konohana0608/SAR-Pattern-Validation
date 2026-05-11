@@ -253,23 +253,35 @@ class GammaMapEvaluator:
         spatial_term_sq = dist_pix_sq / float(dta * dta)
 
         h, w = reference.shape
-        gamma_cap_sq = float(gamma_cap * gamma_cap)
-        gamma_sq = np.full((h, w), gamma_cap_sq, dtype=np.float32)
         finite_evaluation = np.isfinite(evaluation)
 
-        for dr, dc, spatial_sq in zip(rr, cc, spatial_term_sq, strict=False):
-            ref_shifted = reference_padded[
+        # Build (N_offsets, H, W) stack of shifted reference views, then vectorize.
+        n_offsets = len(rr)
+        shifts = np.empty((n_offsets, h, w), dtype=np.float32)
+        for i, (dr, dc) in enumerate(zip(rr, cc, strict=False)):
+            shifts[i] = reference_padded[
                 search_radius + dr : search_radius + dr + h,
                 search_radius + dc : search_radius + dc + w,
             ]
-            with np.errstate(invalid="ignore"):
-                dose_term_sq = ((evaluation - ref_shifted) / dose_tol) ** 2
-            candidate_sq = spatial_sq + dose_term_sq
-            np.minimum(gamma_sq, candidate_sq, out=gamma_sq, where=finite_evaluation)
 
+        # dose term: (N, H, W)  — suppress invalid where evaluation is non-finite
+        with np.errstate(invalid="ignore"):
+            dose_term_sq = ((evaluation[None] - shifts) / dose_tol) ** 2
+
+        # spatial term: (N, 1, 1)
+        spatial_term_sq_bc = spatial_term_sq.astype(np.float32)[:, None, None]
+
+        # candidate_sq: (N, H, W)
+        candidate_sq = spatial_term_sq_bc + dose_term_sq
+
+        # min over offsets -> (H, W)
+        gamma_sq = np.min(candidate_sq, axis=0)
+
+        # clamp to cap, sqrt, apply NaN mask
+        gamma_cap_sq = float(gamma_cap * gamma_cap)
+        np.clip(gamma_sq, None, gamma_cap_sq, out=gamma_sq)
         gamma = np.sqrt(gamma_sq).astype(np.float32, copy=False)
         gamma[~finite_evaluation] = np.nan
-        gamma[gamma > gamma_cap] = float(gamma_cap)
         return gamma
 
     @staticmethod

@@ -39,7 +39,7 @@ jobs:
 
       - name: Sync dependencies
         shell: bash
-        run: uv sync --all-groups
+        run: uv sync --all-groups --frozen
 
       - name: Print environment
         shell: bash
@@ -89,7 +89,7 @@ jobs:
 
   #     - name: Sync dependencies
   #       shell: bash
-  #       run: uv sync --all-groups
+  #       run: uv sync --all-groups --frozen
 
   #     - name: Print environment
   #       shell: bash
@@ -106,6 +106,44 @@ jobs:
   #         path: coverage.xml
   #         if-no-files-found: error
   #         retention-days: 30
+
+  type-check:
+    name: Lint & type check (ruff + ty)
+    runs-on: ubuntu-latest
+    container:
+      image: itisfoundation/jupyter-math:3.0.5
+    env:
+      DISPLAY: ":0"
+      NVIDIA_DRIVER_CAPABILITIES: all
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        shell: bash
+        run: |
+          apt-get update
+          apt-get install -y gnupg time procps tree curl
+          apt-key adv --fetch-keys https://developer.download.nvidia.com/compute/cuda/repos/ubuntu1804/x86_64/3bf863cc.pub
+          apt-key adv --fetch-keys https://developer.download.nvidia.com/compute/machine-learning/repos/ubuntu1804/x86_64/7fa2af80.pub
+
+      - name: Install uv
+        shell: bash
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR="/usr/local/bin" sh
+          uv --version
+
+      - name: Sync dependencies
+        shell: bash
+        run: uv sync --all-groups --frozen
+
+      - name: Run ruff linter
+        shell: bash
+        run: uv run ruff check src/ tests/
+
+      - name: Run ty type checker
+        shell: bash
+        run: uv run ty check src/ || true
 
   e2e-tests:
     name: E2E (Voila + Playwright)
