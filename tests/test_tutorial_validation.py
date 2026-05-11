@@ -42,8 +42,7 @@ def _write_gamma_field(gamma_map: np.ndarray, evaluation_mask: np.ndarray) -> No
     )
 
 
-@pytest.mark.integration
-@pytest.mark.slow
+@pytest.mark.validation
 def test_tutorial_dataset_metrics_match_reference_artifact() -> None:
     artifact = _load_artifact()
     dataset = artifact["dataset"]

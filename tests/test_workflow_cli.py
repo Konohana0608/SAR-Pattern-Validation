@@ -8,7 +8,7 @@ import pytest
 from sar_pattern_validation.workflow_cli import main
 
 
-@pytest.mark.slow
+@pytest.mark.validation
 def test_cli_main_function_with_measured_data(tmp_path: Path) -> None:
     """
     Test the main() function directly with measured data files from Git LFS.
@@ -108,7 +108,7 @@ def test_cli_main_function_with_measured_data(tmp_path: Path) -> None:
     assert registered_image_path.exists(), "Registered overlay image should be saved"
 
 
-@pytest.mark.slow
+@pytest.mark.validation
 def test_cli_main_function_with_example_data(tmp_path: Path) -> None:
     """
     Test the main() function directly with example data files.
@@ -187,8 +187,7 @@ def test_cli_main_function_with_example_data(tmp_path: Path) -> None:
     assert registered_output.exists(), "Registered overlay image should be saved"
 
 
-@pytest.mark.slow
-@pytest.mark.integration
+@pytest.mark.validation
 def test_cli_via_subprocess(tmp_path: Path) -> None:
     """
     Test the CLI as it would be invoked from a subprocess (like in the frontend).
@@ -258,7 +257,7 @@ def test_cli_output_dir_creates_artifacts(tmp_path: Path) -> None:
         str(reference_file),
         "--power_level_dbm",
         "30.0",
-        "--no-render_plots",  # avoid plt.show() calls for intermediate plots
+        "--no-render_plots",
         "--output-dir",
         str(output_dir),
     ]
@@ -322,8 +321,7 @@ def test_cli_error_handling(tmp_path: Path) -> None:
     assert "message" in error_output["error"]
 
 
-@pytest.mark.slow
-@pytest.mark.integration
+@pytest.mark.validation
 def test_cli_via_uvx_like_frontend(tmp_path: Path) -> None:
     """
     Test the CLI as it would be invoked from the frontend using uvx.
