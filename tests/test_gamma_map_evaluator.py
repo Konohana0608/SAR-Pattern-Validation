@@ -77,7 +77,7 @@ def test_gamma_dose_only_uniform_fields_is_analytic():
     evaluator = GammaMapEvaluator(
         reference_sar_linear=ref_img,
         measured_sar_linear=meas_img,
-        measured_to_reference_transform=_identity_transform(),
+        reference_to_measured_transform=_identity_transform(),
         dose_to_agreement_percent=dose_percent,
         distance_to_agreement_mm=2.0,
         gamma_cap=10.0,  # avoid cap interfering
@@ -126,7 +126,7 @@ def test_gamma_distance_only_single_peak_shift_is_analytic():
     evaluator = GammaMapEvaluator(
         reference_sar_linear=ref_img,
         measured_sar_linear=meas_img,
-        measured_to_reference_transform=_identity_transform(),
+        reference_to_measured_transform=_identity_transform(),
         dose_to_agreement_percent=1.0,
         distance_to_agreement_mm=dta_mm,
         gamma_cap=10.0,
@@ -184,7 +184,7 @@ def test_gamma_distance_case_between_one_and_cap_is_analytic():
     evaluator = GammaMapEvaluator(
         reference_sar_linear=ref_img,
         measured_sar_linear=meas_img,
-        measured_to_reference_transform=_identity_transform(),
+        reference_to_measured_transform=_identity_transform(),
         dose_to_agreement_percent=0.0001,
         distance_to_agreement_mm=2.0,
         gamma_cap=2.0,
@@ -217,7 +217,7 @@ def test_gamma_distance_case_beyond_cap_is_capped():
     evaluator = GammaMapEvaluator(
         reference_sar_linear=ref_img,
         measured_sar_linear=meas_img,
-        measured_to_reference_transform=_identity_transform(),
+        reference_to_measured_transform=_identity_transform(),
         dose_to_agreement_percent=0.0001,
         distance_to_agreement_mm=2.0,
         gamma_cap=2.0,
@@ -248,7 +248,7 @@ def test_evaluation_mask_reference_only_is_used_as_is():
     evaluator = GammaMapEvaluator(
         reference_sar_linear=ref_img,
         measured_sar_linear=meas_img,
-        measured_to_reference_transform=_identity_transform(),
+        reference_to_measured_transform=_identity_transform(),
         dose_to_agreement_percent=5.0,
         distance_to_agreement_mm=2.0,
     )
@@ -286,7 +286,7 @@ def test_evaluation_mask_intersection_reference_and_resampled_measured():
     evaluator = GammaMapEvaluator(
         reference_sar_linear=ref_img,
         measured_sar_linear=meas_img,
-        measured_to_reference_transform=_identity_transform(),
+        reference_to_measured_transform=_identity_transform(),
         dose_to_agreement_percent=5.0,
         distance_to_agreement_mm=2.0,
     )
