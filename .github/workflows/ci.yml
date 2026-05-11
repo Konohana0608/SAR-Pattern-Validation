@@ -58,16 +58,15 @@ jobs:
     env:
       MPLBACKEND: Agg
     steps:
-      - name: Install git-lfs
-        shell: bash
-        run: apt-get update && apt-get install -y --no-install-recommends git-lfs
-
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Pull example LFS data
+      - name: Install git-lfs and pull example data
         shell: bash
-        run: git lfs pull --include="data/example/**"
+        run: |
+          apt-get update && apt-get install -y --no-install-recommends git-lfs
+          git lfs install
+          git lfs pull --include="data/example/**"
 
       - name: Sync dependencies
         shell: bash
