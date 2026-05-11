@@ -175,13 +175,12 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
         run: |
           /home/jovyan/.venv/bin/python -m pytest -v -o "addopts=" \
-            --run-e2e -p no:xdist -m "not skip"\
+            --run-e2e -p no:xdist -m "not skip" \
             --screenshot on \
-            --video on \
+            --video retain-on-failure \
             --tracing retain-on-failure \
             --output /tmp/playwright-results \
             tests/test_voila_e2e.py
-      # --video retain-on-failure \
 
       - name: Upload E2E artifacts
         if: always()
