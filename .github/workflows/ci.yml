@@ -64,7 +64,10 @@ jobs:
       - name: Install git-lfs and pull example data
         shell: bash
         run: |
-          apt-get update && apt-get install -y --no-install-recommends git-lfs || true
+          apt-get update -qq
+          apt-get download git-lfs
+          dpkg -x git-lfs_*.deb /tmp/git-lfs-pkg
+          find /tmp/git-lfs-pkg -name git-lfs -type f -exec install -m755 {} /usr/local/bin/git-lfs \;
           git lfs install --skip-repo
           git lfs pull --include="data/example/**"
 
