@@ -146,6 +146,13 @@ jobs:
             libxdamage1 libxext6 libxfixes3 libxrandr2 libgbm1 libasound2 \
             libpangocairo-1.0-0 libpango-1.0-0 libcairo2 fonts-liberation
 
+      - name: Pull git-lfs example data
+        shell: bash
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git lfs install
+          git lfs pull --include="data/example/**"
+
       - name: Install uv
         shell: bash
         run: |
