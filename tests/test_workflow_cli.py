@@ -235,6 +235,7 @@ def test_cli_via_subprocess(tmp_path: Path) -> None:
     assert gamma_output.exists()
 
 
+@pytest.mark.validation
 def test_cli_output_dir_creates_artifacts(tmp_path: Path) -> None:
     """
     Passing --output-dir should produce results.json, gamma_map.npy,
