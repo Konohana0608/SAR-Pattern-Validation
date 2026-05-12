@@ -124,5 +124,6 @@ class WorkflowConfig:
     save_failures_overlay: bool = True
     log_level: str = DEFAULT_LOG_LEVEL
     plotting: PlottingConfig = field(default_factory=PlottingConfig)
+    output_dir: str | None = None
     measurement_area_x_mm: float | None = None
     measurement_area_y_mm: float | None = None

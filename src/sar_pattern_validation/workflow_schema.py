@@ -122,6 +122,7 @@ class WorkflowConfigSchema(BaseModel):
     save_failures_overlay: bool = True
     log_level: str = DEFAULT_LOG_LEVEL
     plotting: PlottingConfigSchema = Field(default_factory=PlottingConfigSchema)
+    output_dir: str | None = None
     measurement_area_x_mm: float | None = Field(
         default=None,
         gt=MEASUREMENT_AREA_MIN_MM_EXCLUSIVE,

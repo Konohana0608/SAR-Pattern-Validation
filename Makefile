@@ -8,8 +8,8 @@ JUPYTER_MATH_IMAGE ?= itisfoundation/jupyter-math:3.0.5
 help:
 	@echo "Available targets:"
 	@echo "  tests                - Run all tests (use target=<test_file>::<test_function> for specific test)"
-	@echo "  tests-fast           - Run only fast tests (excludes slow marker)"
-	@echo "  tests-slow           - Run only slow tests"
+	@echo "  tests-fast           - Run only fast tests (excludes slow and validation markers)"
+	@echo "  tests-slow           - Run slow and integration tests (excludes measurement-validation)"
 	@echo "  tests-cov            - Run all tests with coverage report"
 	@echo "  measurement-validation - Run measurement validation in parallel with xdist"
 	@echo "  lint                 - Run Ruff lint checks"
@@ -44,15 +44,15 @@ else
 	uv run pytest -v tests/
 endif
 
-# Run only fast tests (exclude slow marker)
+# Run only fast tests (exclude slow and validation markers)
 tests-fast:
-	@echo "Running fast tests (excluding slow tests)..."
-	uv run pytest -v -m "not slow" tests/
+	@echo "Running fast tests (excluding slow and validation tests)..."
+	uv run pytest -v -m "not slow and not validation" tests/
 
-# Run only slow tests
+# Run slow and integration tests (excludes measurement-validation)
 tests-slow:
-	@echo "Running slow tests..."
-	uv run pytest -v --run-slow -m "slow" tests/
+	@echo "Running slow and integration tests (excluding measurement-validation)..."
+	uv run pytest -v --run-slow --run-validation -m "slow or validation" --ignore=tests/test_measurement_validation.py tests/
 
 # Run tests with coverage (matches CI behavior)
 tests-cov:
@@ -62,7 +62,7 @@ tests-cov:
 
 measurement-validation:
 	@echo "Running measurement validation with xdist..."
-	uv run pytest -v -n auto --dist loadscope tests/test_measurement_validation.py --run-slow
+	uv run pytest -v -n auto --dist loadscope --run-validation tests/test_measurement_validation.py
 
 lint:
 	@echo "Running Ruff linter..."
