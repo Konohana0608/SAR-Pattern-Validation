@@ -44,15 +44,18 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 _KERNEL_TIMEOUT = 120_000  # ms — kernel startup + initial render
 _UPLOAD_CSV_PATH = _REPO_ROOT / "data" / "example" / "measured_sSAR1g.csv"
 
-# Reference selection used by _ensure_run_button_enabled. The four (column, value)
-# pairs uniquely identify a row in data/database/, so the run button can enable
-# deterministically. The resulting reference CSV is the file CI must pull from
-# Git LFS — keep this in sync with .github/workflows/ci.yml's `git lfs pull`.
-#   filename: dipole_1450MHz_Flat_10mm_1g.csv
+# Reference selection used by _ensure_run_button_enabled. The four (column,
+# value) pairs uniquely identify a row in data/database/, so the run button
+# can enable deterministically. The resulting reference CSV is the file CI
+# must pull from Git LFS — keep this in sync with
+# .github/workflows/ci.yml's `git lfs pull`.
+#   filename: dipole_1450MHz_Flat_5mm_1g.csv (smallest dipole 1g reference;
+#   the previous blind-iteration code converged on the same row via sorted
+#   order, so keeping it matches the workflow runtime the suite is tuned for)
 _REFERENCE_FILTERS: tuple[tuple[str, str], ...] = (
     ("Antenna Type", "dipole"),
     ("Frequency [MHz]", "1450.0"),
-    ("Distance [mm]", "10.0"),
+    ("Distance [mm]", "5.0"),
     ("Mass [g]", "1.0"),
 )
 _REFERENCE_VALUES: frozenset[str] = frozenset(v for _, v in _REFERENCE_FILTERS)

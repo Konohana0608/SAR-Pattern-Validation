@@ -154,7 +154,7 @@ jobs:
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git lfs install
           git lfs pull --include="data/example/**"
-          git lfs pull --include="data/database/dipole_1450MHz_Flat_10mm_1g.csv"
+          git lfs pull --include="data/database/dipole_1450MHz_Flat_5mm_1g.csv"
 
       - name: Install uv
         shell: bash
