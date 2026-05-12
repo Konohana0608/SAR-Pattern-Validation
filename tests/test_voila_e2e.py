@@ -221,7 +221,14 @@ def _ensure_run_button_enabled(voila_page) -> None:
 
 
 def _wait_for_workflow_cycle(voila_page, timeout_ms: int = 120_000) -> None:
-    """Wait for Compare Patterns to disable (running) then re-enable (done)."""
+    """Wait for Compare Patterns to disable (running) then re-enable (done).
+
+    Drives off the button-state cycle, not body text. When the page has stale
+    result content in the DOM (restored session, prior run), any text-based
+    terminal-state probe matches immediately and hides whether the new run
+    actually completed. The disable→enable transition is the only signal that
+    survives reruns.
+    """
     _log(">> wait_for_workflow_cycle: starting")
     run_btn = voila_page.locator("button:has-text('Compare Patterns')")
     _FIND_BTN = (
@@ -229,22 +236,25 @@ def _wait_for_workflow_cycle(voila_page, timeout_ms: int = 120_000) -> None:
         ".find(b => b.textContent.includes('Compare Patterns'))"
     )
     _log("   waiting up to 10s for run button to become disabled (cycle started)")
-    cycle_started = True
-    with contextlib.suppress(Exception):
-        voila_page.wait_for_function(
-            f"() => {{ const b = ({_FIND_BTN})(); return b && b.disabled; }}",
-            timeout=10_000,
-        )
-    if run_btn.get_attribute("disabled") is None:
-        cycle_started = False
-        _log(
-            "   run button never observed disabled; proceeding with terminal-state wait"
-        )
+    voila_page.wait_for_function(
+        f"() => {{ const b = ({_FIND_BTN})(); return b && b.disabled; }}",
+        timeout=10_000,
+    )
 
-    # Terminal states for a Compare Patterns click. The error-banner forms
-    # (`Error:`, `Workflow execution failed`, `Could not reach …`) are listed
-    # so a silent backend failure short-circuits the 120 s wait — the success-
-    # path assertions below still gate on the result-table strings.
+    _log(
+        f"   waiting up to {timeout_ms / 1000:.0f}s for run button to re-enable (cycle done)"
+    )
+    voila_page.wait_for_function(
+        f"() => {{ const b = ({_FIND_BTN})(); return b && !b.disabled; }}",
+        timeout=timeout_ms,
+    )
+    assert run_btn.get_attribute("disabled") is None
+
+    # The notebook's handle_button_click renders the result table *before* the
+    # `finally` branch re-enables the button, so by this point the DOM should
+    # already be in a terminal state. Verify it explicitly so a silent error
+    # banner (`Error: …` from _set_feedback_banner) fails the test rather than
+    # being masked by stale "Pass rate" text from an earlier run.
     terminal_state_js = (
         "() => {"
         "  const bodyText = document.body.innerText;"
@@ -258,26 +268,10 @@ def _wait_for_workflow_cycle(voila_page, timeout_ms: int = 120_000) -> None:
         "    || /\\bError:\\s/.test(bodyText);"
         "}"
     )
-
-    _log(
-        f"   waiting up to {timeout_ms / 1000:.0f}s for terminal UI state after run click"
-    )
+    _log("   verifying rendered terminal state in DOM")
     voila_page.wait_for_function(
         terminal_state_js,
-        timeout=timeout_ms,
-    )
-
-    if cycle_started:
-        _log("   waiting up to 30s for run button to re-enable after terminal state")
-        voila_page.wait_for_function(
-            f"() => {{ const b = ({_FIND_BTN})(); return b && !b.disabled; }}",
-            timeout=30_000,
-        )
-    assert run_btn.get_attribute("disabled") is None
-    _log("   waiting for rendered result state in DOM")
-    voila_page.wait_for_function(
-        terminal_state_js,
-        timeout=30_000,
+        timeout=10_000,
     )
     _log("<< wait_for_workflow_cycle: complete")
 
