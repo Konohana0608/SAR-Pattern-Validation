@@ -120,7 +120,4 @@ class WorkflowConfig:
     plotting: PlottingConfig = field(default_factory=PlottingConfig)
     output_dir: str | None = None
 
-    measurement_area_x_mm: float | None = None
-    measurement_area_y_mm: float | None = None
-
     min_inscribed_square_mm: float = DEFAULT_MIN_INSCRIBED_SQUARE_MM
