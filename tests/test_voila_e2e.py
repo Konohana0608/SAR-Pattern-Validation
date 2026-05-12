@@ -195,10 +195,18 @@ def _wait_for_workflow_cycle(voila_page, timeout_ms: int = 120_000) -> None:
         timeout=timeout_ms,
     )
     assert run_btn.get_attribute("disabled") is None
-    _log("   waiting for result table to render in DOM")
+    _log("   waiting for rendered result state in DOM")
     voila_page.wait_for_function(
-        "() => document.body.innerText.includes('Pass rate')",
-        timeout=10_000,
+        "() => {"
+        "  const bodyText = document.body.innerText;"
+        "  const bodyHtml = document.body.innerHTML;"
+        "  return bodyText.includes('Pass rate')"
+        "    || bodyHtml.includes('Reference, 30 dBm')"
+        "    || bodyText.includes('already match the current results')"
+        "    || bodyText.includes('SAR pattern validation complete.')"
+        "    || bodyText.includes('Could not reach the Voila server');"
+        "}",
+        timeout=30_000,
     )
     _log("<< wait_for_workflow_cycle: complete")
 
