@@ -570,16 +570,29 @@ _MEAS_Y_DEFAULT = 0.0
 _MEAS_Y_MIN = 22.01
 
 
-def _set_meas_area(voila_page, x: float, y: float) -> None:
-    """Set measurement area x and y inputs (inputs at index 1 and 2 in DOM order)."""
+def _set_meas_area(voila_page, x: int, y: int) -> None:
+    """Set measurement area x and y inputs (inputs at index 1 and 2 in DOM order).
+
+    The widgets are BoundedIntText, so values are typed as integer strings.
+    After typing each one, wait until the DOM value reflects what we asked for —
+    otherwise a silent rejection (e.g. typing a float into an int input) would
+    leave the widget at its previous value and the test would silently mis-fire.
+    """
     _log(f">> set_meas_area: x={x}, y={y}")
     num_inputs = voila_page.locator("input[type='number']")
     for nth, value in [(1, x), (2, y)]:
         inp = num_inputs.nth(nth)
-        inp.triple_click()
+        inp.click(click_count=3)
         inp.type(str(value))
         inp.press("Tab")
-    voila_page.wait_for_timeout(300)
+        voila_page.wait_for_function(
+            "({nth, expected}) => {"
+            "  const inputs = document.querySelectorAll(\"input[type='number']\");"
+            "  return inputs.length > nth && Number(inputs[nth].value) === expected;"
+            "}",
+            arg={"nth": nth, "expected": value},
+            timeout=5_000,
+        )
     _log("<< set_meas_area: done")
 
 
@@ -601,28 +614,28 @@ class TestMeasurementAreaInputs:
     def test_measurement_area_between_0_and_22_shows_error(self, voila_page) -> None:
         _log(">> test_measurement_area_between_0_and_22_shows_error")
         _ensure_run_button_enabled(voila_page)
-        _set_meas_area(voila_page, 15.0, 15.0)
+        _set_meas_area(voila_page, 15, 15)
         _click_run_expect_error(voila_page, "Measurement area must be > 22 mm")
         _log("<< test_measurement_area_between_0_and_22_shows_error: pass")
 
     def test_measurement_area_exactly_22_shows_error(self, voila_page) -> None:
         _log(">> test_measurement_area_exactly_22_shows_error")
         _ensure_run_button_enabled(voila_page)
-        _set_meas_area(voila_page, 22.0, 22.0)
+        _set_meas_area(voila_page, 22, 22)
         _click_run_expect_error(voila_page, "Measurement area must be > 22 mm")
         _log("<< test_measurement_area_exactly_22_shows_error: pass")
 
     def test_measurement_area_y_below_22_shows_error(self, voila_page) -> None:
         _log(">> test_measurement_area_y_below_22_shows_error")
         _ensure_run_button_enabled(voila_page)
-        _set_meas_area(voila_page, 30.0, 15.0)
+        _set_meas_area(voila_page, 30, 15)
         _click_run_expect_error(voila_page, "Measurement area must be > 22 mm")
         _log("<< test_measurement_area_y_below_22_shows_error: pass")
 
     def test_measurement_area_x_accepts_upper_bound_600(self, voila_page) -> None:
         _log(">> test_measurement_area_x_accepts_upper_bound_600")
         x_input = voila_page.locator("input[type='number']").nth(1)
-        x_input.triple_click()
+        x_input.click(click_count=3)
         x_input.type("600")
         x_input.press("Tab")
         voila_page.wait_for_function(
@@ -639,7 +652,7 @@ class TestMeasurementAreaInputs:
     def test_measurement_area_y_accepts_upper_bound_400(self, voila_page) -> None:
         _log(">> test_measurement_area_y_accepts_upper_bound_400")
         y_input = voila_page.locator("input[type='number']").nth(2)
-        y_input.triple_click()
+        y_input.click(click_count=3)
         y_input.type("400")
         y_input.press("Tab")
         voila_page.wait_for_function(
@@ -656,7 +669,7 @@ class TestMeasurementAreaInputs:
     def test_measurement_area_zero_auto_allows_run(self, voila_page) -> None:
         _log(">> test_measurement_area_zero_auto_allows_run")
         _ensure_run_button_enabled(voila_page)
-        _set_meas_area(voila_page, 0.0, 0.0)
+        _set_meas_area(voila_page, 0, 0)
         run_btn = voila_page.locator("button:has-text('Compare Patterns')")
         assert run_btn.get_attribute("disabled") is None
         run_btn.click()
@@ -669,7 +682,7 @@ class TestMeasurementAreaInputs:
 
     def test_measurement_area_restored_to_valid_before_run(self, voila_page) -> None:
         _log(">> test_measurement_area_restored_to_valid_before_run")
-        _set_meas_area(voila_page, 300.0, 200.0)
+        _set_meas_area(voila_page, 300, 200)
         _log("<< test_measurement_area_restored_to_valid_before_run: pass")
 
 
