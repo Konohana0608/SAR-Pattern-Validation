@@ -572,7 +572,7 @@ _NOISE_FLOOR_MAX = 0.1
 
 def _noise_floor_input(voila_page):
     return (
-        voila_page.locator(".widget-bounded-text")
+        voila_page.locator(".widget-text")
         .filter(has=voila_page.locator(f"label:has-text('{_NOISE_FLOOR_LABEL_TEXT}')"))
         .locator("input[type='number']")
     )
