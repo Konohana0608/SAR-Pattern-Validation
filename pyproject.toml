@@ -79,12 +79,6 @@ markers = [
 source = ["src"]
 omit = ["*/tests/*", "*/__pycache__/*", "*/site-packages/*"]
 
-[tool.ty.environment]
-python-version = "3.10"
-
-[tool.ty.rules]
-# Start with warnings-only; flip to "error" once codebase is clean
-
 [tool.coverage.report]
 exclude_lines = [
     "pragma: no cover",
