@@ -40,6 +40,17 @@ repos:
       - id: nbstripout
         files: \.ipynb$
 
+  # Type checking
+  - repo: local
+    hooks:
+      - id: ty-check
+        name: ty type check
+        entry: uv run ty check
+        args: [src/]
+        language: system
+        pass_filenames: false
+        types: [python]
+
   # Security checks
   - repo: https://github.com/PyCQA/bandit
     rev: 1.9.4

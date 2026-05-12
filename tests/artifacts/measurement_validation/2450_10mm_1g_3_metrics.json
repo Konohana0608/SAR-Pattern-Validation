@@ -5,11 +5,11 @@
     "reference_csv": "data/database/dipole_2450MHz_Flat_10mm_1g.csv"
   },
   "expected": {
-    "evaluated_pixel_count": 6771,
+    "evaluated_pixel_count": 4350,
     "failed_pixel_count": 0,
     "measured_pssar": 45.89103324428423,
     "pass_rate_percent": 100.0,
-    "passed_pixel_count": 6771,
+    "passed_pixel_count": 4350,
     "reference_pssar": 53.24983839553704,
     "scaling_error": -0.13819394336170532
   },

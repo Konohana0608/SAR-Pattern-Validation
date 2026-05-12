@@ -27,6 +27,12 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         help="Run tests marked as slow during broad test runs.",
     )
     parser.addoption(
+        "--run-validation",
+        action="store_true",
+        default=False,
+        help="Run tests marked as validation (requires Git LFS data).",
+    )
+    parser.addoption(
         "--run-e2e",
         action="store_true",
         default=False,
@@ -60,6 +66,18 @@ def _should_skip_slow(config: pytest.Config) -> bool:
     return not (markexpr and "slow" in markexpr and "not slow" not in markexpr)
 
 
+def _should_skip_validation(config: pytest.Config) -> bool:
+    if bool(config.getoption("--run-validation")):
+        return False
+    if _is_explicit_selection(config):
+        return False
+
+    markexpr = str(getattr(config.option, "markexpr", "") or "").strip()
+    return not (
+        markexpr and "validation" in markexpr and "not validation" not in markexpr
+    )
+
+
 def _should_skip_e2e(config: pytest.Config) -> bool:
     if bool(config.getoption("--run-e2e")):
         return False
@@ -69,11 +87,15 @@ def _should_skip_e2e(config: pytest.Config) -> bool:
 def pytest_runtest_setup(item: pytest.Item) -> None:
     if item.get_closest_marker("slow") and _should_skip_slow(item.config):
         pytest.skip(
-            "slow test skipped by default for bulk runs; select it directly or pass --run-slow"
+            "slow test skipped by default; select it directly or pass --run-slow"
+        )
+    if item.get_closest_marker("validation") and _should_skip_validation(item.config):
+        pytest.skip(
+            "validation test skipped by default; select it directly or pass --run-validation"
         )
     if item.get_closest_marker("e2e") and _should_skip_e2e(item.config):
         pytest.skip(
-            "e2e test skipped by default for bulk runs; pass --run-e2e and run with -p no:xdist"
+            "e2e test skipped by default; pass --run-e2e and run with -p no:xdist"
         )
 
 

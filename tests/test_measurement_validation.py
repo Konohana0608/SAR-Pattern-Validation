@@ -217,7 +217,7 @@ def measurement_case(request: pytest.FixtureRequest) -> MeasurementValidationCas
     return request.param
 
 
-@pytest.mark.slow
+@pytest.mark.validation
 def test_measurement_workflow_cases_match_reference_artifacts(
     measurement_case: MeasurementValidationCase,
     request: pytest.FixtureRequest,
