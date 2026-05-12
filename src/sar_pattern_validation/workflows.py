@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 from dataclasses import asdict, dataclass, field, is_dataclass
 from enum import Enum
@@ -80,6 +81,43 @@ class WorkflowResult:
     distance_to_agreement: float
     gamma_map: np.ndarray | None = field(default=None, compare=False)
     evaluation_mask: np.ndarray | None = field(default=None, compare=False)
+
+
+def _write_output_dir(
+    output_dir: Path,
+    result: WorkflowResult,
+    evaluator: GammaMapEvaluator,
+) -> None:
+    """
+    Write artifacts to output_dir:
+      - results.json    (scalar WorkflowResult fields)
+      - gamma_map.npy   (gamma map array)
+      - gamma_map.png   (gamma map visualisation)
+      - failure_map.png (failure map visualisation)
+    """
+    import dataclasses
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    excluded = {f.value for f in WorkflowResultCLIExcludedFields}
+    scalar_fields: dict[str, Any] = {}
+    for f in dataclasses.fields(result):
+        if f.name in excluded:
+            continue
+        v = getattr(result, f.name)
+        scalar_fields[f.name] = str(v) if isinstance(v, Path) else v
+
+    (output_dir / "results.json").write_text(
+        json.dumps(scalar_fields, indent=2), encoding="utf-8"
+    )
+
+    if result.gamma_map is not None:
+        np.save(output_dir / "gamma_map.npy", result.gamma_map)
+
+    evaluator.show(
+        gamma_image_save_path=output_dir / "gamma_map.png",
+        failure_image_save_path=output_dir / "failure_map.png",
+    )
 
 
 def _failure_overlay_path(
@@ -279,7 +317,7 @@ def _complete_workflow(config: WorkflowConfig) -> WorkflowResult:
             evaluator.passed_pixel_count,
             evaluator.failed_pixel_count,
         )
-        return WorkflowResult(
+        workflow_result = WorkflowResult(
             pass_rate_percent=evaluator.pass_rate_percent,
             evaluated_pixel_count=evaluator.evaluated_pixel_count,
             passed_pixel_count=evaluator.passed_pixel_count,
@@ -299,6 +337,11 @@ def _complete_workflow(config: WorkflowConfig) -> WorkflowResult:
             gamma_map=gamma_map,
             evaluation_mask=evaluation_mask,
         )
+
+        if config.output_dir is not None:
+            _write_output_dir(Path(config.output_dir), workflow_result, evaluator)
+
+        return workflow_result
     except Exception as exc:
         raise WorkflowExecutionError(f"Workflow failed: {exc}") from exc
 
@@ -419,6 +462,13 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--plot-light-axes-facecolor", type=str, default=None)
     parser.add_argument("--plot-save-dpi", type=int, default=None)
     parser.add_argument("--log_level", type=str, default=DEFAULT_LOG_LEVEL)
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        default=None,
+        dest="output_dir",
+        help="If set, write results.json, gamma_map.npy, gamma_map.png, and failure_map.png here.",
+    )
     return parser
 
 
@@ -429,7 +479,7 @@ def _normalize_plotting_config(raw_config: dict[str, Any]) -> dict[str, Any]:
     if plotting is None:
         plotting = {}
     elif is_dataclass(plotting):
-        plotting = asdict(plotting)  # type: ignore
+        plotting = asdict(plotting)
     elif hasattr(plotting, "items"):
         plotting = dict(plotting.items())
     else:
