@@ -115,6 +115,7 @@ class WorkflowConfigSchema(BaseModel):
     save_failures_overlay: bool = True
     log_level: str = DEFAULT_LOG_LEVEL
     plotting: PlottingConfigSchema = Field(default_factory=PlottingConfigSchema)
+    output_dir: str | None = None
 
     @field_validator("log_level")
     @classmethod

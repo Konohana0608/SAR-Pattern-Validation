@@ -44,6 +44,22 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 _KERNEL_TIMEOUT = 120_000  # ms — kernel startup + initial render
 _UPLOAD_CSV_PATH = _REPO_ROOT / "data" / "example" / "measured_sSAR1g.csv"
 
+# Reference selection used by _ensure_run_button_enabled. The four (column,
+# value) pairs uniquely identify a row in data/database/, so the run button
+# can enable deterministically. The resulting reference CSV is the file CI
+# must pull from Git LFS — keep this in sync with
+# .github/workflows/ci.yml's `git lfs pull`.
+#   filename: dipole_1450MHz_Flat_5mm_1g.csv (smallest dipole 1g reference;
+#   the previous blind-iteration code converged on the same row via sorted
+#   order, so keeping it matches the workflow runtime the suite is tuned for)
+_REFERENCE_FILTERS: tuple[tuple[str, str], ...] = (
+    ("Antenna Type", "dipole"),
+    ("Frequency [MHz]", "1450.0"),
+    ("Distance [mm]", "5.0"),
+    ("Mass [g]", "1.0"),
+)
+_REFERENCE_VALUES: frozenset[str] = frozenset(v for _, v in _REFERENCE_FILTERS)
+
 
 # ---------------------------------------------------------------------------
 # Logging helper — plain print() so `pytest -v -s` shows the trail.
@@ -140,42 +156,79 @@ def _ensure_run_button_enabled(voila_page) -> None:
         _log("   no upload yet — performing initial upload")
         _upload_file(voila_page, _UPLOAD_CSV_PATH)
 
-    toggle_buttons = voila_page.locator(".widget-toggle-button")
-    count = toggle_buttons.count()
-    _log(f"   found {count} toggle buttons; will click until run button enables")
     run_btn = voila_page.locator("button:has-text('Compare Patterns')")
-
     _FIND_RUN_BTN = (
         "() => [...document.querySelectorAll('button')]"
         ".find(b => b.textContent.includes('Compare Patterns'))"
     )
 
-    for i in range(count):
-        if run_btn.get_attribute("disabled") is None:
-            _log(f"<< ensure_run_button_enabled: enabled after {i} toggle clicks")
-            return
-        btn = toggle_buttons.nth(i)
-        if not btn.is_disabled():
-            _log(f"   clicking toggle {i}/{count}")
-            btn.click()
-            voila_page.wait_for_timeout(500)
+    if run_btn.get_attribute("disabled") is None:
+        _log("<< ensure_run_button_enabled: already enabled")
+        return
 
-    # check_settings polls every 1 s; wait up to 2 s for it to fire after the
-    # last click before falling through to the asserting failure message.
+    # Click the target value in each filter column. Each column is a VBox
+    # whose first child is `<b>{column_name}</b>`. We anchor on the <b> and
+    # take its *closest* widget-vbox ancestor — a plain `.widget-vbox:has(b…)`
+    # would also match parent VBoxes (e.g. the cell-level wrapper) and pull
+    # in toggles from neighbour columns like "10.0" appearing in both
+    # Distance=10mm and Mass=10g. `:text-is()` keeps "1.0" from also
+    # matching "10.0" inside the same column.
+    for column_name, value in _REFERENCE_FILTERS:
+        column = voila_page.locator(
+            f'xpath=//b[normalize-space()="{column_name}"]'
+            "/ancestor::*[contains(concat(' ', normalize-space(@class), ' '),"
+            " ' widget-vbox ')][1]"
+        )
+        target_btn = column.locator(f'.widget-toggle-button:text-is("{value}")')
+        classes = target_btn.get_attribute("class") or ""
+        if "mod-active" in classes:
+            _log(f"   {column_name} → {value} already active; skipping")
+            continue
+        _log(f"   clicking {column_name} → {value}")
+        target_btn.click()
+        voila_page.wait_for_timeout(200)
+
+    # check_settings polls every 1 s; wait up to 3 s for it to re-enable.
     with contextlib.suppress(Exception):
         voila_page.wait_for_function(
             f"() => {{ const b = ({_FIND_RUN_BTN})(); return b && !b.disabled; }}",
-            timeout=2_000,
+            timeout=3_000,
         )
+
+    if run_btn.get_attribute("disabled") is not None:
+        # Defensive fallback: clear any stale toggles activated by earlier
+        # tests that don't match our four target values, then re-wait.
+        _log("   run still disabled — clearing stale toggles")
+        active = voila_page.locator(".widget-toggle-button.mod-active")
+        for i in range(active.count()):
+            btn = active.nth(i)
+            text = (btn.text_content() or "").strip()
+            if text in _REFERENCE_VALUES:
+                continue
+            with contextlib.suppress(Exception):
+                btn.click()
+                voila_page.wait_for_timeout(200)
+        with contextlib.suppress(Exception):
+            voila_page.wait_for_function(
+                f"() => {{ const b = ({_FIND_RUN_BTN})(); return b && !b.disabled; }}",
+                timeout=3_000,
+            )
 
     assert run_btn.get_attribute("disabled") is None, (
         "Run button should be enabled once a measured file and unique reference are selected"
     )
-    _log("<< ensure_run_button_enabled: enabled after exhausting toggles")
+    _log("<< ensure_run_button_enabled: enabled")
 
 
 def _wait_for_workflow_cycle(voila_page, timeout_ms: int = 120_000) -> None:
-    """Wait for Compare Patterns to disable (running) then re-enable (done)."""
+    """Wait for Compare Patterns to disable (running) then re-enable (done).
+
+    Drives off the button-state cycle, not body text. When the page has stale
+    result content in the DOM (restored session, prior run), any text-based
+    terminal-state probe matches immediately and hides whether the new run
+    actually completed. The disable→enable transition is the only signal that
+    survives reruns.
+    """
     _log(">> wait_for_workflow_cycle: starting")
     run_btn = voila_page.locator("button:has-text('Compare Patterns')")
     _FIND_BTN = (
@@ -187,17 +240,37 @@ def _wait_for_workflow_cycle(voila_page, timeout_ms: int = 120_000) -> None:
         f"() => {{ const b = ({_FIND_BTN})(); return b && b.disabled; }}",
         timeout=10_000,
     )
+
     _log(
-        f"   waiting up to {timeout_ms / 1000:.0f}s for run button to re-enable (cycle complete)"
+        f"   waiting up to {timeout_ms / 1000:.0f}s for run button to re-enable (cycle done)"
     )
     voila_page.wait_for_function(
         f"() => {{ const b = ({_FIND_BTN})(); return b && !b.disabled; }}",
         timeout=timeout_ms,
     )
     assert run_btn.get_attribute("disabled") is None
-    _log("   waiting for result table to render in DOM")
+
+    # The notebook's handle_button_click renders the result table *before* the
+    # `finally` branch re-enables the button, so by this point the DOM should
+    # already be in a terminal state. Verify it explicitly so a silent error
+    # banner (`Error: …` from _set_feedback_banner) fails the test rather than
+    # being masked by stale "Pass rate" text from an earlier run.
+    terminal_state_js = (
+        "() => {"
+        "  const bodyText = document.body.innerText;"
+        "  const bodyHtml = document.body.innerHTML;"
+        "  return bodyText.includes('Pass rate')"
+        "    || bodyHtml.includes('Reference, 30 dBm')"
+        "    || bodyText.includes('already match the current results')"
+        "    || bodyText.includes('SAR pattern validation complete.')"
+        "    || bodyText.includes('Could not reach the Voila server')"
+        "    || bodyText.includes('Workflow execution failed')"
+        "    || /\\bError:\\s/.test(bodyText);"
+        "}"
+    )
+    _log("   verifying rendered terminal state in DOM")
     voila_page.wait_for_function(
-        "() => document.body.innerText.includes('Pass rate')",
+        terminal_state_js,
         timeout=10_000,
     )
     _log("<< wait_for_workflow_cycle: complete")
@@ -337,6 +410,12 @@ def test_run_workflow_and_check_results_table(voila_page) -> None:
 
     assert "Traceback" not in body_text, (
         f"Python traceback in page:\n{body_text[:3000]}"
+    )
+    assert not re.search(r"\bError:\s", body_text), (
+        f"Error banner in page after workflow ran:\n{body_text[:3000]}"
+    )
+    assert "Workflow execution failed" not in body_text, (
+        f"Workflow failure banner in page:\n{body_text[:3000]}"
     )
     assert "Reference, 30 dBm" in page_html, (
         f"Result table not found.\nBody text:\n{body_text[:3000]}\n\nPage HTML tail:\n{page_html[-2000:]}"
