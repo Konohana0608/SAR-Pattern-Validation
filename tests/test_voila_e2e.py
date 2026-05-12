@@ -183,20 +183,19 @@ def _wait_for_workflow_cycle(voila_page, timeout_ms: int = 120_000) -> None:
         ".find(b => b.textContent.includes('Compare Patterns'))"
     )
     _log("   waiting up to 10s for run button to become disabled (cycle started)")
-    voila_page.wait_for_function(
-        f"() => {{ const b = ({_FIND_BTN})(); return b && b.disabled; }}",
-        timeout=10_000,
-    )
-    _log(
-        f"   waiting up to {timeout_ms / 1000:.0f}s for run button to re-enable (cycle complete)"
-    )
-    voila_page.wait_for_function(
-        f"() => {{ const b = ({_FIND_BTN})(); return b && !b.disabled; }}",
-        timeout=timeout_ms,
-    )
-    assert run_btn.get_attribute("disabled") is None
-    _log("   waiting for rendered result state in DOM")
-    voila_page.wait_for_function(
+    cycle_started = True
+    with contextlib.suppress(Exception):
+        voila_page.wait_for_function(
+            f"() => {{ const b = ({_FIND_BTN})(); return b && b.disabled; }}",
+            timeout=10_000,
+        )
+    if run_btn.get_attribute("disabled") is None:
+        cycle_started = False
+        _log(
+            "   run button never observed disabled; proceeding with terminal-state wait"
+        )
+
+    terminal_state_js = (
         "() => {"
         "  const bodyText = document.body.innerText;"
         "  const bodyHtml = document.body.innerHTML;"
@@ -205,7 +204,27 @@ def _wait_for_workflow_cycle(voila_page, timeout_ms: int = 120_000) -> None:
         "    || bodyText.includes('already match the current results')"
         "    || bodyText.includes('SAR pattern validation complete.')"
         "    || bodyText.includes('Could not reach the Voila server');"
-        "}",
+        "}"
+    )
+
+    _log(
+        f"   waiting up to {timeout_ms / 1000:.0f}s for terminal UI state after run click"
+    )
+    voila_page.wait_for_function(
+        terminal_state_js,
+        timeout=timeout_ms,
+    )
+
+    if cycle_started:
+        _log("   waiting up to 30s for run button to re-enable after terminal state")
+        voila_page.wait_for_function(
+            f"() => {{ const b = ({_FIND_BTN})(); return b && !b.disabled; }}",
+            timeout=30_000,
+        )
+    assert run_btn.get_attribute("disabled") is None
+    _log("   waiting for rendered result state in DOM")
+    voila_page.wait_for_function(
+        terminal_state_js,
         timeout=30_000,
     )
     _log("<< wait_for_workflow_cycle: complete")
