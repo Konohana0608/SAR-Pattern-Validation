@@ -79,6 +79,8 @@ class WorkflowResult:
     scaling_error: float
     dose_to_agreement: float
     distance_to_agreement: float
+    min_inscribed_square_mm: float
+    mask_fits_min_inscribed_square: bool
     gamma_map: np.ndarray | None = field(default=None, compare=False)
     evaluation_mask: np.ndarray | None = field(default=None, compare=False)
 
@@ -310,12 +312,32 @@ def _complete_workflow(config: WorkflowConfig) -> WorkflowResult:
         ):
             raise RuntimeError("Gamma evaluation completed without summary metrics.")
 
+        # Per MGD 2026-04-24 feedback (slide 7): the gamma comparison is only
+        # valid when an axis-aligned square of `min_inscribed_square_mm` fits
+        # entirely inside the (post-registration, post-noise-filter) mask. This
+        # rejects pathological L-shaped or thin masks that would pass per-axis
+        # checks but cannot host a 10 g averaging cube face.
+        mask_fits_min_inscribed_square = (
+            evaluator.evaluation_mask_fits_axis_aligned_square_mm(
+                config.min_inscribed_square_mm
+            )
+        )
+        if not mask_fits_min_inscribed_square:
+            LOGGER.warning(
+                "Gamma evaluation mask does not contain an inscribed %.1f mm × %.1f mm "
+                "axis-aligned square; comparison should be considered invalid.",
+                config.min_inscribed_square_mm,
+                config.min_inscribed_square_mm,
+            )
+
         LOGGER.info(
-            "Gamma completed: pass_rate=%.2f%%, evaluated=%d, passed=%d, failed=%d",
+            "Gamma completed: pass_rate=%.2f%%, evaluated=%d, passed=%d, failed=%d, "
+            "mask_fits_min_inscribed_square=%s",
             evaluator.pass_rate_percent,
             evaluator.evaluated_pixel_count,
             evaluator.passed_pixel_count,
             evaluator.failed_pixel_count,
+            mask_fits_min_inscribed_square,
         )
         workflow_result = WorkflowResult(
             pass_rate_percent=evaluator.pass_rate_percent,
@@ -334,6 +356,8 @@ def _complete_workflow(config: WorkflowConfig) -> WorkflowResult:
             scaling_error=loader.scaling_error,
             dose_to_agreement=config.dose_to_agreement,
             distance_to_agreement=config.distance_to_agreement,
+            min_inscribed_square_mm=config.min_inscribed_square_mm,
+            mask_fits_min_inscribed_square=mask_fits_min_inscribed_square,
             gamma_map=gamma_map,
             evaluation_mask=evaluation_mask,
         )
@@ -461,6 +485,15 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--plot-dark-axes-facecolor", type=str, default=None)
     parser.add_argument("--plot-light-axes-facecolor", type=str, default=None)
     parser.add_argument("--plot-save-dpi", type=int, default=None)
+    parser.add_argument(
+        "--min_inscribed_square_mm",
+        type=float,
+        default=defaults.min_inscribed_square_mm,
+        help=(
+            "Minimum axis-aligned square (mm) that must fit within the gamma "
+            "evaluation mask for the comparison to be valid."
+        ),
+    )
     parser.add_argument("--log_level", type=str, default=DEFAULT_LOG_LEVEL)
     parser.add_argument(
         "--output-dir",
