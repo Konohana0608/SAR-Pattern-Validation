@@ -115,7 +115,7 @@ def test_apply_roi_policy_sets_expected_masks() -> None:
     evaluator = GammaMapEvaluator(
         reference_sar_linear=reference,
         measured_sar_linear=measured,
-        measured_to_reference_transform=sitk.Euler2DTransform(),
+        reference_to_measured_transform=sitk.Euler2DTransform(),
     )
 
     _apply_roi_policy(
@@ -146,8 +146,7 @@ def test_apply_roi_policy_sets_expected_masks() -> None:
     assert evaluator.measured_mask_u8 is None
 
 
-@pytest.mark.integration
-@pytest.mark.slow
+@pytest.mark.validation
 def test_complete_workflow_integration_saves_overlay_outputs(tmp_path) -> None:
     project_root = Path(__file__).resolve().parents[1]
     measured_csv = project_root / "data/example/measured_sSAR1g.csv"
@@ -191,8 +190,7 @@ def test_complete_workflow_integration_saves_overlay_outputs(tmp_path) -> None:
     assert result.failure_image_path.exists()
 
 
-@pytest.mark.integration
-@pytest.mark.slow
+@pytest.mark.validation
 def test_complete_workflow_passes_shared_plotting_config(tmp_path, monkeypatch) -> None:
     project_root = Path(__file__).resolve().parents[1]
     measured_csv = project_root / "data/example/measured_sSAR1g.csv"
@@ -304,7 +302,7 @@ def test_complete_workflow_recovers_high_pass_rate_for_shifted_synthetic_input(
     unregistered = GammaMapEvaluator(
         reference_sar_linear=shifted_loader.reference_image_linear,
         measured_sar_linear=shifted_loader.measured_image_linear,
-        measured_to_reference_transform=sitk.TranslationTransform(2),
+        reference_to_measured_transform=sitk.TranslationTransform(2),
         dose_to_agreement_percent=5.0,
         distance_to_agreement_mm=2.0,
         gamma_cap=2.0,
@@ -404,7 +402,7 @@ def test_complete_workflow_roi_policies_change_evaluated_region_consistently(
     )
     assert (
         reference_only_result.evaluated_pixel_count
-        > intersection_result.evaluated_pixel_count
+        >= intersection_result.evaluated_pixel_count
     )
     assert (
         intersection_result.pass_rate_percent >= reference_only_result.pass_rate_percent

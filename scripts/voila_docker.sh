@@ -40,6 +40,29 @@ if [ -t 0 ] && [ -t 1 ]; then INTERACTIVE_FLAGS=(-it); fi
 PORT_FLAGS=()
 if [ "${1:-test}" = "shell" ]; then
     PORT_FLAGS=(-p "$VOILA_HOST_PORT:8866")
+
+    # Auto-open the host browser once Voila is reachable on the forwarded port.
+    # This runs in the background and is best-effort (no hard failure if no GUI).
+    (
+        URL="http://localhost:$VOILA_HOST_PORT/"
+
+        for _i in $(seq 1 60); do
+            if (echo >"/dev/tcp/127.0.0.1/$VOILA_HOST_PORT") >/dev/null 2>&1; then
+                break
+            fi
+            sleep 1
+        done
+
+        if command -v xdg-open >/dev/null 2>&1; then
+            xdg-open "$URL" >/dev/null 2>&1 || true
+        elif command -v gio >/dev/null 2>&1; then
+            gio open "$URL" >/dev/null 2>&1 || true
+        elif command -v sensible-browser >/dev/null 2>&1; then
+            sensible-browser "$URL" >/dev/null 2>&1 || true
+        elif command -v wslview >/dev/null 2>&1; then
+            wslview "$URL" >/dev/null 2>&1 || true
+        fi
+    ) &
 fi
 
 exec docker run --rm "${INTERACTIVE_FLAGS[@]}" \

@@ -44,3 +44,5 @@ htmlcov/
 .codex
 *.zip
 .serena
+.claude
+test-artifacts/
