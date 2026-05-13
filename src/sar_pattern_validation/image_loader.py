@@ -516,7 +516,7 @@ class SARImageLoader:
             sar_image=aligned_unit,
             x_axis_m=x_meas,
             y_axis_m=y_meas,
-            title="Simulated, After Registration",
+            title="Reference, After Registration",
             xlabel="$x_e$ (mm)",
             ylabel="$y_e$ (mm)",
             save_path=aligned_meas_save_path,
