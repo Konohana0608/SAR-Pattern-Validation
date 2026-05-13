@@ -559,3 +559,78 @@ def test_uploading_new_data_clears_prior_results(voila_page, tmp_path: Path) -> 
     assert "Reference, 30 dBm" not in page_html
     assert "psSAR" not in page_html
     _log("<< test_uploading_new_data_clears_prior_results: pass")
+
+
+# ---------------------------------------------------------------------------
+# Noise floor widget tests
+# ---------------------------------------------------------------------------
+
+_NOISE_FLOOR_LABEL_TEXT = "noise floor"
+_NOISE_FLOOR_DEFAULT = 0.05
+_NOISE_FLOOR_MAX = 0.1
+
+
+def _noise_floor_input(voila_page):
+    return (
+        voila_page.locator(".widget-text")
+        .filter(has=voila_page.locator(f"label:has-text('{_NOISE_FLOOR_LABEL_TEXT}')"))
+        .locator("input[type='number']")
+    )
+
+
+def _set_noise_floor(voila_page, value: float) -> None:
+    _log(f">> set_noise_floor: setting noise floor input to {value}")
+    inp = _noise_floor_input(voila_page)
+    inp.click()
+    inp.fill(str(value))
+    inp.press("Tab")
+    voila_page.wait_for_timeout(300)
+    _log(f"<< set_noise_floor: done (value={value})")
+
+
+def test_noise_floor_widget_is_visible(voila_page) -> None:
+    """The noise floor input widget must be visible on page load."""
+    _log(">> test_noise_floor_widget_is_visible")
+    assert _noise_floor_input(voila_page).is_visible()
+    _log("<< test_noise_floor_widget_is_visible: pass")
+
+
+def test_noise_floor_widget_default_value(voila_page) -> None:
+    """The noise floor widget must default to 0.05 W/kg."""
+    _log(">> test_noise_floor_widget_default_value")
+    inp = _noise_floor_input(voila_page)
+    actual = float(inp.input_value())
+    _log(f"   noise_floor input value = {actual}")
+    assert actual == pytest.approx(_NOISE_FLOOR_DEFAULT, abs=1e-9)
+    _log("<< test_noise_floor_widget_default_value: pass")
+
+
+def test_noise_floor_widget_clamped_at_max(voila_page) -> None:
+    """Setting noise floor above 0.1 W/kg must be clamped to 0.1 (BoundedFloatText)."""
+    _log(">> test_noise_floor_widget_clamped_at_max")
+    _set_noise_floor(voila_page, 0.5)
+    inp = _noise_floor_input(voila_page)
+    actual = float(inp.input_value())
+    _log(f"   noise_floor after setting 0.5 = {actual}")
+    assert actual == pytest.approx(_NOISE_FLOOR_MAX, abs=1e-9)
+    _set_noise_floor(voila_page, _NOISE_FLOOR_DEFAULT)
+    _log("<< test_noise_floor_widget_clamped_at_max: pass")
+
+
+def test_noise_floor_persisted_after_change_and_reload(voila_page) -> None:
+    """Changing noise floor then reloading the page must restore the saved value."""
+    _log(">> test_noise_floor_persisted_after_change_and_reload")
+    target = 0.08
+    _set_noise_floor(voila_page, target)
+
+    _log(f"   reloading page (timeout={_KERNEL_TIMEOUT}ms)")
+    voila_page.reload(timeout=_KERNEL_TIMEOUT)
+    voila_page.wait_for_selector(".widget-button", timeout=_KERNEL_TIMEOUT)
+
+    inp = _noise_floor_input(voila_page)
+    actual = float(inp.input_value())
+    _log(f"   noise_floor after reload = {actual}")
+    assert actual == pytest.approx(target, abs=1e-9)
+
+    _set_noise_floor(voila_page, _NOISE_FLOOR_DEFAULT)
+    _log("<< test_noise_floor_persisted_after_change_and_reload: pass")
