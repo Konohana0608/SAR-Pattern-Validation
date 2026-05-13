@@ -219,10 +219,8 @@ def _ensure_run_button_enabled(voila_page) -> None:
     )
     _log("<< ensure_run_button_enabled: enabled")
 
-
 def _wait_for_workflow_cycle(voila_page, timeout_ms: int = 300_000) -> None:
     """Wait for Compare Patterns to disable (running) then re-enable (done).
-
     Drives off the button-state cycle, not body text. When the page has stale
     result content in the DOM (restored session, prior run), any text-based
     terminal-state probe matches immediately and hides whether the new run
