@@ -486,6 +486,30 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--plot-light-axes-facecolor", type=str, default=None)
     parser.add_argument("--plot-save-dpi", type=int, default=None)
     parser.add_argument(
+        "--report",
+        action="store_true",
+        help="Generate the LaTeX validation report into <report_output_dir>/.",
+    )
+    parser.add_argument(
+        "--report_output_dir",
+        type=str,
+        default=None,
+        help="Output directory for the generated LaTeX report (default: ./report).",
+    )
+    parser.add_argument(
+        "--report_template_dir",
+        type=str,
+        default=None,
+        help="Override path to the LaTeX report template directory.",
+    )
+    parser.add_argument(
+        "--report_antenna_type",
+        type=str,
+        default="dipole",
+    )
+    parser.add_argument("--report_frequency_mhz", type=int, default=0)
+    parser.add_argument("--report_distance_mm", type=int, default=0)
+    parser.add_argument("--report_mass_g", type=int, default=0)
         "--min_inscribed_square_mm",
         type=float,
         default=defaults.min_inscribed_square_mm,
@@ -547,6 +571,17 @@ def _normalize_plotting_config(raw_config: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
+_REPORT_KEYS = (
+    "report",
+    "report_output_dir",
+    "report_template_dir",
+    "report_antenna_type",
+    "report_frequency_mhz",
+    "report_distance_mm",
+    "report_mass_g",
+)
+
+
 def complete_workflow(*args, **kwargs) -> WorkflowResult:
     parser = _build_parser()
 
@@ -557,6 +592,8 @@ def complete_workflow(*args, **kwargs) -> WorkflowResult:
         parsed = parser.parse_args([str(a) for a in args] if args else None)
         raw_config = vars(parsed)
 
+    report_settings = {key: raw_config.pop(key, None) for key in _REPORT_KEYS}
+
     raw_config = _normalize_plotting_config(raw_config)
 
     config = validate_workflow_config(raw_config)
@@ -564,7 +601,28 @@ def complete_workflow(*args, **kwargs) -> WorkflowResult:
     configure_root_logging(config.log_level)
 
     LOGGER.info("WORKFLOW START with config: %s", config)
-    return _complete_workflow(config)
+    result = _complete_workflow(config)
+
+    if report_settings.get("report"):
+        from sar_pattern_validation.report import (
+            DEFAULT_TEMPLATE_DIR,
+            generate_report,
+        )
+
+        report_path = generate_report(
+            workflow_result=result,
+            workflow_config=config,
+            output_dir=report_settings.get("report_output_dir") or "report",
+            template_dir=report_settings.get("report_template_dir")
+            or DEFAULT_TEMPLATE_DIR,
+            antenna_type=report_settings.get("report_antenna_type") or "dipole",
+            frequency_mhz=report_settings.get("report_frequency_mhz") or 0,
+            distance_mm=report_settings.get("report_distance_mm") or 0,
+            mass_g=report_settings.get("report_mass_g") or 0,
+        )
+        LOGGER.info("Report written to: %s", report_path)
+
+    return result
 
 
 if __name__ == "__main__":
