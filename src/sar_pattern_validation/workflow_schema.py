@@ -117,7 +117,6 @@ class WorkflowConfigSchema(BaseModel):
     log_level: str = DEFAULT_LOG_LEVEL
     plotting: PlottingConfigSchema = Field(default_factory=PlottingConfigSchema)
     output_dir: str | None = None
-
     min_inscribed_square_mm: float = Field(
         default=DEFAULT_MIN_INSCRIBED_SQUARE_MM, gt=0
     )

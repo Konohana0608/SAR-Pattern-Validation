@@ -119,5 +119,4 @@ class WorkflowConfig:
     log_level: str = DEFAULT_LOG_LEVEL
     plotting: PlottingConfig = field(default_factory=PlottingConfig)
     output_dir: str | None = None
-
     min_inscribed_square_mm: float = DEFAULT_MIN_INSCRIBED_SQUARE_MM
