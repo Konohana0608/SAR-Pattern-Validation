@@ -26,6 +26,7 @@ from sar_pattern_validation.workflow_config import (
     DEFAULT_GAMMA_CAP,
     DEFAULT_LOG_LEVEL,
     DEFAULT_MEASURED_FILE_PATH,
+    DEFAULT_MIN_INSCRIBED_SQUARE_MM,
     DEFAULT_NOISE_FLOOR,
     DEFAULT_PLOT_DARK_AXES_FACECOLOR,
     DEFAULT_PLOT_FIGURE_FACECOLOR,
@@ -132,6 +133,8 @@ class WorkflowConfigSchema(BaseModel):
         default=None,
         gt=MEASUREMENT_AREA_MIN_MM_EXCLUSIVE,
         le=MEASUREMENT_AREA_MAX_Y_MM,
+    min_inscribed_square_mm: float = Field(
+        default=DEFAULT_MIN_INSCRIBED_SQUARE_MM, gt=0
     )
 
     @field_validator("log_level")
