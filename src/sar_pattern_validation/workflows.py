@@ -233,6 +233,19 @@ def _complete_workflow(config: WorkflowConfig) -> WorkflowResult:
         measured_mask_u8, reference_mask_u8 = loader.make_metric_masks()
         measured_support_u8, _ = loader.make_support_masks()
 
+        if not np.any(sitk.GetArrayFromImage(measured_mask_u8)):
+            _issue = ValidationIssue(
+                severity="error",
+                code="EMPTY_MEASURED_MASK",
+                message=(
+                    f"No measured SAR values exceed the noise floor "
+                    f"({config.noise_floor:.3f} W/kg; measured peak: "
+                    f"{loader.measured_raw_peak:.4g} W/kg). "
+                    f"Lower the noise floor or check the measurement file."
+                ),
+            )
+            raise WorkflowExecutionError(_issue.message, issue=_issue)
+
         reg = Rigid2DRegistration(
             fixed_image=measured_db,
             moving_image=reference_db,
@@ -377,6 +390,8 @@ def _complete_workflow(config: WorkflowConfig) -> WorkflowResult:
             _write_output_dir(Path(config.output_dir), workflow_result, evaluator)
 
         return workflow_result
+    except WorkflowExecutionError:
+        raise
     except CsvFormatError as exc:
         _issue = ValidationIssue(
             severity="error",

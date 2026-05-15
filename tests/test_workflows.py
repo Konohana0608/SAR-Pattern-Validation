@@ -430,6 +430,32 @@ def test_complete_workflow_emits_mask_too_small_issue(tmp_path: Path) -> None:
     assert "1000" in issue.message
 
 
+def test_complete_workflow_v1_empty_measured_mask_raises_issue(tmp_path: Path) -> None:
+    """V1: noise_floor > measured peak → EMPTY_MEASURED_MASK issue, not a raw ITK crash."""
+    from sar_pattern_validation.errors import WorkflowExecutionError
+
+    _, reference_csv = _write_synthetic_workflow_pair(tmp_path)
+    # Write a measured CSV whose peak (0.001 W/kg) is below the default noise_floor (0.05)
+    x, y = make_rect_grid(xmin=-0.04, xmax=0.04, ymin=-0.04, ymax=0.04, step=0.005)
+    _, _, Z = gaussian_2d(x, y, x0=0.0, y0=0.0, sx=0.02, sy=0.02, peak=0.001)
+    sub_floor_csv = tmp_path / "sub_floor_measured.csv"
+    write_sar_csv(sub_floor_csv, x, y, Z)
+
+    with pytest.raises(WorkflowExecutionError) as exc_info:
+        complete_workflow(
+            measured_file_path=str(sub_floor_csv),
+            reference_file_path=str(reference_csv),
+            render_plots=False,
+            show_plot=False,
+        )
+
+    issue = exc_info.value.issue
+    assert issue is not None
+    assert issue.code == "EMPTY_MEASURED_MASK"
+    assert issue.severity == "error"
+    assert "noise floor" in issue.message.lower()
+
+
 def test_complete_workflow_emits_csv_format_error_issue(tmp_path: Path) -> None:
     """CSV_FORMAT_ERROR issue is carried on WorkflowExecutionError for malformed input."""
     from sar_pattern_validation.errors import WorkflowExecutionError
