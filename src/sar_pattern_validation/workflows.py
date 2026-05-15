@@ -311,6 +311,7 @@ def _complete_workflow(config: WorkflowConfig) -> WorkflowResult:
                 aligned_db,
                 title="Rigid Registration Overlay",
                 image_save_path=registered_image_save_path,
+                noise_floor_mask=loader._measured_noise_floor_mask,
                 plotting_config=config.plotting,
             )
 
@@ -342,6 +343,7 @@ def _complete_workflow(config: WorkflowConfig) -> WorkflowResult:
             evaluator.show(
                 gamma_image_save_path=gamma_comparison_image_path,
                 failure_image_save_path=failure_image_path,
+                noise_floor_mask=loader._measured_noise_floor_mask,
                 plotting_config=config.plotting,
             )
 

@@ -143,6 +143,7 @@ class GammaMapEvaluator:
         *,
         gamma_image_save_path: Path | None = None,
         failure_image_save_path: Path | None = None,
+        noise_floor_mask: np.ndarray | None = None,
         plotting_config: PlottingConfig | None = None,
     ) -> None:
         """
@@ -165,6 +166,7 @@ class GammaMapEvaluator:
             extent_mm=self._extent_mm(self.measured_sar_linear),
             gamma_image_save_path=gamma_image_save_path,
             failure_image_save_path=failure_image_save_path,
+            noise_floor_mask=noise_floor_mask,
             plotting_config=plotting_config,
         )
 

@@ -22,6 +22,7 @@ Terminology
 from __future__ import annotations
 
 import warnings
+from dataclasses import replace
 from pathlib import Path
 from typing import NamedTuple
 
@@ -99,6 +100,9 @@ class SARImageLoader:
         meas_mask = (meas_sar >= cutoff_wkg) & meas_support
         ref_mask = (ref_sar >= cutoff_wkg) & ref_support
 
+        meas_noise_floor_mask = meas_support & ~(meas_sar >= cutoff_wkg)
+        ref_noise_floor_mask = ref_support & ~(ref_sar >= cutoff_wkg)
+
         self.measured_peak = (
             float(meas_sar[meas_mask].max()) if np.any(meas_mask) else 1e-12
         )
@@ -141,6 +145,8 @@ class SARImageLoader:
         self._reference_mask_abs = ref_mask
         self._measured_support_mask = meas_support
         self._reference_support_mask = ref_support
+        self._measured_noise_floor_mask = meas_noise_floor_mask
+        self._reference_noise_floor_mask = ref_noise_floor_mask
         self._measured_axes_m = meas_axes
         self._reference_axes_m = ref_axes
 
@@ -467,6 +473,10 @@ class SARImageLoader:
                 reference_image=ref_unit,
                 measured_axes=(x_meas, y_meas),
                 reference_axes=(x_ref, y_ref),
+                measured_support_mask=self._measured_support_mask,
+                reference_support_mask=self._reference_support_mask,
+                measured_noise_floor_mask=self._measured_noise_floor_mask,
+                reference_noise_floor_mask=self._reference_noise_floor_mask,
                 image_save_path=image_save_path,
                 plotting_config=plotting_config,
             )
@@ -487,8 +497,24 @@ class SARImageLoader:
             ylabel="$y_e$ (mm)",
             save_path=measured_save_path,
             show_colorbar=False,
+            support_mask=self._measured_support_mask,
+            noise_floor_mask=self._measured_noise_floor_mask,
             plotting_config=plotting_config,
         )
+
+        reference_plotting_config = plotting_config
+        if plotting_config is not None:
+            half = max(
+                (plotting_config.window_mm[1] - plotting_config.window_mm[0]) / 2.0,
+                (plotting_config.window_mm[3] - plotting_config.window_mm[2]) / 2.0,
+            )
+            reference_plotting_config = replace(
+                plotting_config,
+                center_x_mm=0.0,
+                center_y_mm=0.0,
+                window_mm=(-half, half, -half, half),
+            )
+
         plot_sar_image(
             sar_image=ref_unit,
             x_axis_m=x_ref,
@@ -498,7 +524,9 @@ class SARImageLoader:
             ylabel="$y_r$ (mm)",
             save_path=reference_save_path,
             show_colorbar=False,
-            plotting_config=plotting_config,
+            support_mask=self._reference_support_mask,
+            noise_floor_mask=self._reference_noise_floor_mask,
+            plotting_config=reference_plotting_config,
         )
 
     def plot_aligned(
@@ -521,5 +549,7 @@ class SARImageLoader:
             ylabel="$y_e$ (mm)",
             save_path=aligned_meas_save_path,
             show_colorbar=True,
+            support_mask=self._measured_support_mask,
+            noise_floor_mask=self._measured_noise_floor_mask,
             plotting_config=plotting_config,
         )
