@@ -184,6 +184,45 @@ def plot_sar_image(
         _save_or_show(fig, save_path, config)
 
 
+def _overlay_measurement_limit_mask(ax, config: PlottingConfig) -> None:
+    x_mm = config.measurement_area_x_mm
+    y_mm = config.measurement_area_y_mm
+    if x_mm is None or y_mm is None:
+        return
+    x_half = x_mm / 2.0
+    y_half = y_mm / 2.0
+    side_half = max(x_half, y_half)
+    grey = config.not_evaluated_color
+    if y_half < side_half:
+        strip_h = side_half - y_half
+        for y0 in (y_half, -side_half):
+            ax.add_patch(
+                mpatches.Rectangle(
+                    (-side_half, y0),
+                    2 * side_half,
+                    strip_h,
+                    color=grey,
+                    transform=ax.transData,
+                    zorder=5,
+                    linewidth=0,
+                )
+            )
+    if x_half < side_half:
+        strip_w = side_half - x_half
+        for x0 in (-side_half, x_half):
+            ax.add_patch(
+                mpatches.Rectangle(
+                    (x0, -side_half),
+                    strip_w,
+                    2 * side_half,
+                    color=grey,
+                    transform=ax.transData,
+                    zorder=5,
+                    linewidth=0,
+                )
+            )
+
+
 def plot_gamma_results(
     *,
     gamma_map: np.ndarray,
@@ -201,10 +240,10 @@ def plot_gamma_results(
     with _style_context(config):
         fig, ax = plt.subplots(figsize=config.single_figure_size)
         fig.set_facecolor(config.figure_facecolor)
-        ax.set_facecolor(config.light_axes_facecolor)
+        ax.set_facecolor(config.not_evaluated_color)
 
         cmap = mpl.colormaps["plasma"].copy()
-        cmap.set_bad(config.light_axes_facecolor)
+        cmap.set_bad(config.not_evaluated_color)
 
         im = ax.imshow(
             masked_gamma,
@@ -221,6 +260,7 @@ def plot_gamma_results(
         ax.set_ylim(config.window_mm[2], config.window_mm[3])
         ax.set_xlabel("$x_e$ (mm)")
         ax.set_ylabel("$y_e$ (mm)")
+        _overlay_measurement_limit_mask(ax, config)
         fig.tight_layout()
         if gamma_image_save_path is not None:
             colorbar_path_v = _derive_colorbar_path(
@@ -248,10 +288,15 @@ def plot_gamma_results(
     with _style_context(config):
         fig, ax = plt.subplots(figsize=config.single_figure_size)
         fig.set_facecolor(config.figure_facecolor)
-        ax.set_facecolor(config.light_axes_facecolor)
+        ax.set_facecolor(config.not_evaluated_color)
+        eval_masked = np.ma.masked_where(
+            evaluation_mask == 0, evaluation_mask.astype(float)
+        )
+        cmap_eval = mpl.colormaps["gray"].copy()
+        cmap_eval.set_bad(config.not_evaluated_color)
         ax.imshow(
-            evaluation_mask.astype(float),
-            cmap="gray",
+            eval_masked,
+            cmap=cmap_eval,
             vmin=0,
             vmax=1,
             interpolation="nearest",
@@ -273,6 +318,7 @@ def plot_gamma_results(
         ax.set_ylim(config.window_mm[2], config.window_mm[3])
         ax.set_xlabel("$x_e$ (mm)")
         ax.set_ylabel("$y_e$ (mm)")
+        _overlay_measurement_limit_mask(ax, config)
         ax.legend(
             handles=[
                 mpatches.Patch(

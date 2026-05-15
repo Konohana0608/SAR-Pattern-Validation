@@ -18,8 +18,9 @@ dependencies = [
 
 [project.optional-dependencies]
 e2e = [
-    "pytest-playwright>=0.5",
-    "playwright>=1.40",
+    "pytest-playwright>=0.7.2",
+    "playwright>=1.59.0",
+    "voila>=0.5.12",
 ]
 
 [project.scripts]
@@ -73,6 +74,7 @@ markers = [
     "slow: mark test as compute-heavy (uses synthetic data, no LFS needed)",
     "validation: mark test as validation against reference artifacts (requires Git LFS data)",
     "e2e: end-to-end Playwright test against a live voila server (gated by --run-e2e; run with -p no:xdist)",
+    "notebook_smoke: kernel-execution smoke test for notebooks/voila.ipynb; requires jupyter-math container, runs before Playwright in e2e-tests CI job",
 ]
 
 [tool.coverage.run]

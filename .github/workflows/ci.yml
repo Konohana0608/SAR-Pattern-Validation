@@ -39,7 +39,7 @@ jobs:
 
       - name: Run tests with coverage
         shell: bash
-        run: uv run pytest -v -m "not slow and not validation" --cov=src/sar_pattern_validation --cov-report=xml:coverage.xml --cov-report=term tests/
+        run: uv run pytest -v -m "not slow and not validation and not notebook_smoke" --cov=src/sar_pattern_validation --cov-report=xml:coverage.xml --cov-report=term tests/
 
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v7
@@ -79,7 +79,7 @@ jobs:
       - name: Run slow and integration tests
         shell: bash
         run: |
-          uv run pytest -v -m "slow or validation" \
+          uv run pytest -v -m "(slow or validation) and not notebook_smoke" \
             --basetemp=test-artifacts \
             --ignore=tests/test_measurement_validation.py \
             --cov=src/sar_pattern_validation --cov-report=xml:coverage-validation.xml --cov-report=term \
@@ -171,6 +171,15 @@ jobs:
       - name: Install Chromium for Playwright
         shell: bash
         run: /home/jovyan/.venv/bin/playwright install chromium
+
+      - name: Notebook kernel smoke test (§V3 — fail fast before Playwright)
+        shell: bash
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          /home/jovyan/.venv/bin/python -m pytest -v -o "addopts=" \
+            -m notebook_smoke \
+            tests/test_notebook_smoke.py
 
       - name: Run voila e2e suite
         shell: bash
