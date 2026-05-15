@@ -219,37 +219,38 @@ def _complete_workflow(config: WorkflowConfig) -> WorkflowResult:
 
         reference_db, measured_db = loader.get_images()
 
-        # Override plot window: square, centered on measured data centroid.
-        # Uses measurement_area dims if set; otherwise 10%-padded data span.
+        # Auto-center plot window on the measured data centroid only when the
+        # caller left window_mm at its default value (no explicit override).
         _cx_mm = float(loader._measured_axes_m[0].mean()) * 1000.0
         _cy_mm = float(loader._measured_axes_m[1].mean()) * 1000.0
-        _x_span_mm = (
-            loader._measured_axes_m[0].max() - loader._measured_axes_m[0].min()
-        ) * 1000.0
-        _y_span_mm = (
-            loader._measured_axes_m[1].max() - loader._measured_axes_m[1].min()
-        ) * 1000.0
-        if (
-            config.plotting.measurement_area_x_mm is not None
-            and config.plotting.measurement_area_y_mm is not None
-        ):
-            _half = (
-                max(
-                    config.plotting.measurement_area_x_mm,
-                    config.plotting.measurement_area_y_mm,
-                )
-                / 2.0
-            )
-        else:
-            _half = max(_x_span_mm, _y_span_mm) / 2.0 * 1.1
-        config.plotting.window_mm = (
-            _cx_mm - _half,
-            _cx_mm + _half,
-            _cy_mm - _half,
-            _cy_mm + _half,
-        )
         config.plotting.center_x_mm = _cx_mm
         config.plotting.center_y_mm = _cy_mm
+        if config.plotting.window_mm == DEFAULT_PLOT_WINDOW_MM:
+            _x_span_mm = (
+                loader._measured_axes_m[0].max() - loader._measured_axes_m[0].min()
+            ) * 1000.0
+            _y_span_mm = (
+                loader._measured_axes_m[1].max() - loader._measured_axes_m[1].min()
+            ) * 1000.0
+            if (
+                config.plotting.measurement_area_x_mm is not None
+                and config.plotting.measurement_area_y_mm is not None
+            ):
+                _half = (
+                    max(
+                        config.plotting.measurement_area_x_mm,
+                        config.plotting.measurement_area_y_mm,
+                    )
+                    / 2.0
+                )
+            else:
+                _half = max(_x_span_mm, _y_span_mm) / 2.0 * 1.1
+            config.plotting.window_mm = (
+                _cx_mm - _half,
+                _cx_mm + _half,
+                _cy_mm - _half,
+                _cy_mm + _half,
+            )
 
         if config.render_plots and (
             config.show_plot
