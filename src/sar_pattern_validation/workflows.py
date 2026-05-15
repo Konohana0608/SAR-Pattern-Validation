@@ -11,7 +11,11 @@ from typing import Any
 import numpy as np
 import SimpleITK as sitk
 
-from sar_pattern_validation.errors import WorkflowExecutionError
+from sar_pattern_validation.errors import (
+    CsvFormatError,
+    ValidationIssue,
+    WorkflowExecutionError,
+)
 from sar_pattern_validation.gamma_eval import GammaMapEvaluator
 from sar_pattern_validation.image_loader import SARImageLoader
 from sar_pattern_validation.plotting import show_registration_overlay
@@ -81,6 +85,7 @@ class WorkflowResult:
     distance_to_agreement: float
     min_inscribed_square_mm: float
     mask_fits_min_inscribed_square: bool
+    issues: list[ValidationIssue] = field(default_factory=list)
     gamma_map: np.ndarray | None = field(default=None, compare=False)
     evaluation_mask: np.ndarray | None = field(default=None, compare=False)
 
@@ -228,6 +233,19 @@ def _complete_workflow(config: WorkflowConfig) -> WorkflowResult:
         measured_mask_u8, reference_mask_u8 = loader.make_metric_masks()
         measured_support_u8, _ = loader.make_support_masks()
 
+        if not np.any(sitk.GetArrayFromImage(measured_mask_u8)):
+            _issue = ValidationIssue(
+                severity="error",
+                code="EMPTY_MEASURED_MASK",
+                message=(
+                    f"No measured SAR values exceed the noise floor "
+                    f"({config.noise_floor:.3f} W/kg; measured peak: "
+                    f"{loader.measured_raw_peak:.4g} W/kg). "
+                    f"Lower the noise floor or check the measurement file."
+                ),
+            )
+            raise WorkflowExecutionError(_issue.message, issue=_issue)
+
         reg = Rigid2DRegistration(
             fixed_image=measured_db,
             moving_image=reference_db,
@@ -290,7 +308,7 @@ def _complete_workflow(config: WorkflowConfig) -> WorkflowResult:
         _apply_roi_policy(
             evaluator,
             reference_mask_u8=reference_mask_u8,
-            measured_mask_u8=measured_support_u8,
+            measured_mask_u8=measured_mask_u8,
             policy=config.evaluation_roi_policy,
         )
 
@@ -314,21 +332,26 @@ def _complete_workflow(config: WorkflowConfig) -> WorkflowResult:
 
         # Per MGD 2026-04-24 feedback (slide 7): the gamma comparison is only
         # valid when an axis-aligned square of `min_inscribed_square_mm` fits
-        # entirely inside the (post-registration, post-noise-filter) mask. This
-        # rejects pathological L-shaped or thin masks that would pass per-axis
-        # checks but cannot host a 10 g averaging cube face.
+        # entirely inside the (post-registration, post-noise-filter) mask.
+        issues: list[ValidationIssue] = []
         mask_fits_min_inscribed_square = (
             evaluator.evaluation_mask_fits_axis_aligned_square_mm(
                 config.min_inscribed_square_mm
             )
         )
         if not mask_fits_min_inscribed_square:
-            LOGGER.warning(
-                "Gamma evaluation mask does not contain an inscribed %.1f mm × %.1f mm "
-                "axis-aligned square; comparison should be considered invalid.",
-                config.min_inscribed_square_mm,
-                config.min_inscribed_square_mm,
+            _issue = ValidationIssue(
+                severity="warning",
+                code="MASK_TOO_SMALL",
+                message=(
+                    f"Gamma evaluation mask does not contain a "
+                    f"{config.min_inscribed_square_mm:.0f} mm × "
+                    f"{config.min_inscribed_square_mm:.0f} mm axis-aligned inscribed "
+                    f"square. The gamma comparison may be invalid."
+                ),
             )
+            issues.append(_issue)
+            LOGGER.warning(_issue.message)
 
         LOGGER.info(
             "Gamma completed: pass_rate=%.2f%%, evaluated=%d, passed=%d, failed=%d, "
@@ -358,6 +381,7 @@ def _complete_workflow(config: WorkflowConfig) -> WorkflowResult:
             distance_to_agreement=config.distance_to_agreement,
             min_inscribed_square_mm=config.min_inscribed_square_mm,
             mask_fits_min_inscribed_square=mask_fits_min_inscribed_square,
+            issues=issues,
             gamma_map=gamma_map,
             evaluation_mask=evaluation_mask,
         )
@@ -366,6 +390,15 @@ def _complete_workflow(config: WorkflowConfig) -> WorkflowResult:
             _write_output_dir(Path(config.output_dir), workflow_result, evaluator)
 
         return workflow_result
+    except WorkflowExecutionError:
+        raise
+    except CsvFormatError as exc:
+        _issue = ValidationIssue(
+            severity="error",
+            code="CSV_FORMAT_ERROR",
+            message=str(exc),
+        )
+        raise WorkflowExecutionError(f"Workflow failed: {exc}", issue=_issue) from exc
     except Exception as exc:
         raise WorkflowExecutionError(f"Workflow failed: {exc}") from exc
 

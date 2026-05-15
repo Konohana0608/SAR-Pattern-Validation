@@ -95,6 +95,7 @@ class SARImageLoader:
         threshold_cap_wkg = 0.1
         cutoff_wkg = float(min(threshold_cap_wkg, 2.0 * self.noise_floor_wkg))
 
+        self.measured_raw_peak = float(np.max(meas_sar)) if meas_sar.size > 0 else 0.0
         meas_mask = (meas_sar >= cutoff_wkg) & meas_support
         ref_mask = (ref_sar >= cutoff_wkg) & ref_support
 
