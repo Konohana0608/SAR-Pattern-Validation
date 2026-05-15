@@ -407,3 +407,109 @@ def test_complete_workflow_roi_policies_change_evaluated_region_consistently(
     assert (
         intersection_result.pass_rate_percent >= reference_only_result.pass_rate_percent
     )
+
+
+@pytest.mark.slow
+def test_complete_workflow_raises_mask_too_small_pre_registration(
+    tmp_path: Path,
+) -> None:
+    """V3: pre-registration MASK_TOO_SMALL raises WorkflowExecutionError (hard error)."""
+    from sar_pattern_validation.errors import WorkflowExecutionError
+
+    # Narrow Gaussian (σ=4 mm) on a large grid: noise-filtered active area ~20 mm < 22 mm.
+    x, y = make_rect_grid(xmin=-0.05, xmax=0.05, ymin=-0.05, ymax=0.05, step=0.002)
+    _, _, Z_meas = gaussian_2d(x, y, x0=0.0, y0=0.0, sx=0.004, sy=0.004, peak=1.0)
+    measured_csv = tmp_path / "narrow_measured.csv"
+    write_sar_csv(measured_csv, x, y, Z_meas)
+
+    _, _, Z_ref = gaussian_2d(x, y, x0=0.0, y0=0.0, sx=0.020, sy=0.020, peak=1.0)
+    reference_csv = tmp_path / "wide_reference.csv"
+    write_sar_csv(reference_csv, x, y, Z_ref)
+
+    with pytest.raises(WorkflowExecutionError) as exc_info:
+        complete_workflow(
+            measured_file_path=str(measured_csv),
+            reference_file_path=str(reference_csv),
+            render_plots=False,
+            show_plot=False,
+            min_inscribed_square_mm=22.0,
+        )
+
+    issue = exc_info.value.issue
+    assert issue is not None
+    assert issue.code == "MASK_TOO_SMALL"
+    assert issue.severity == "error"
+    assert "pre-registration" in issue.message
+    assert "22" in issue.message
+
+
+@pytest.mark.slow
+def test_complete_workflow_raises_mask_too_small_post_registration(
+    tmp_path: Path,
+) -> None:
+    """V3: 1000 mm threshold hits pre-registration check first — WorkflowExecutionError raised."""
+    from sar_pattern_validation.errors import WorkflowExecutionError
+
+    measured_csv, reference_csv = _write_synthetic_workflow_pair(tmp_path)
+
+    with pytest.raises(WorkflowExecutionError) as exc_info:
+        complete_workflow(
+            measured_file_path=str(measured_csv),
+            reference_file_path=str(reference_csv),
+            render_plots=False,
+            show_plot=False,
+            min_inscribed_square_mm=1000.0,
+        )
+
+    issue = exc_info.value.issue
+    assert issue is not None
+    assert issue.code == "MASK_TOO_SMALL"
+    assert issue.severity == "error"
+    assert "1000" in issue.message
+
+
+def test_complete_workflow_v1_empty_measured_mask_raises_issue(tmp_path: Path) -> None:
+    """V1: noise_floor > measured peak → EMPTY_MEASURED_MASK issue, not a raw ITK crash."""
+    from sar_pattern_validation.errors import WorkflowExecutionError
+
+    _, reference_csv = _write_synthetic_workflow_pair(tmp_path)
+    # Write a measured CSV whose peak (0.001 W/kg) is below the default noise_floor (0.05)
+    x, y = make_rect_grid(xmin=-0.04, xmax=0.04, ymin=-0.04, ymax=0.04, step=0.005)
+    _, _, Z = gaussian_2d(x, y, x0=0.0, y0=0.0, sx=0.02, sy=0.02, peak=0.001)
+    sub_floor_csv = tmp_path / "sub_floor_measured.csv"
+    write_sar_csv(sub_floor_csv, x, y, Z)
+
+    with pytest.raises(WorkflowExecutionError) as exc_info:
+        complete_workflow(
+            measured_file_path=str(sub_floor_csv),
+            reference_file_path=str(reference_csv),
+            render_plots=False,
+            show_plot=False,
+        )
+
+    issue = exc_info.value.issue
+    assert issue is not None
+    assert issue.code == "EMPTY_MEASURED_MASK"
+    assert issue.severity == "error"
+    assert "noise floor" in issue.message.lower()
+
+
+def test_complete_workflow_emits_csv_format_error_issue(tmp_path: Path) -> None:
+    """CSV_FORMAT_ERROR issue is carried on WorkflowExecutionError for malformed input."""
+    from sar_pattern_validation.errors import WorkflowExecutionError
+
+    _, reference_csv = _write_synthetic_workflow_pair(tmp_path)
+    bad_csv = tmp_path / "bad.csv"
+    bad_csv.write_text("not,a,valid,sar,header\n1,2,3,4,5\n")
+
+    with pytest.raises(WorkflowExecutionError) as exc_info:
+        complete_workflow(
+            measured_file_path=str(bad_csv),
+            reference_file_path=str(reference_csv),
+            render_plots=False,
+            show_plot=False,
+        )
+
+    assert exc_info.value.issue is not None
+    assert exc_info.value.issue.code == "CSV_FORMAT_ERROR"
+    assert exc_info.value.issue.severity == "error"
