@@ -19,6 +19,17 @@ os.environ.setdefault("SAVE_TUTORIAL_VALIDATION_PLOTS", "0")
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
+def _tail_text_file(path: Path, max_chars: int = 8000) -> str:
+    """Return the tail of a UTF-8 text file for failure diagnostics."""
+    if not path.exists():
+        return f"<missing log file: {path}>"
+
+    text = path.read_text(encoding="utf-8", errors="replace")
+    if len(text) <= max_chars:
+        return text
+    return text[-max_chars:]
+
+
 def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption(
         "--run-slow",
@@ -157,6 +168,7 @@ def voila_server(tmp_path_factory: pytest.TempPathFactory):
     notebook_source = _REPO_ROOT / "notebooks" / "voila.ipynb"
     port = _free_port()
     workspace_root = tmp_path_factory.mktemp("voila-e2e-workspace")
+    voila_log_path = workspace_root / "voila.log"
     (workspace_root / "sar-pattern-validation").symlink_to(_REPO_ROOT)
     shutil.copy2(notebook_source, workspace_root / "voila.ipynb")
 
@@ -165,53 +177,61 @@ def voila_server(tmp_path_factory: pytest.TempPathFactory):
     env["SAR_PATTERN_VALIDATION_LOCAL_PACKAGE_SOURCE"] = str(_REPO_ROOT)
     env["MPLBACKEND"] = "Agg"
 
-    proc = subprocess.Popen(
-        [
-            sys.executable,
-            "-m",
-            "voila",
-            "voila.ipynb",
-            "--no-browser",
-            f"--port={port}",
-            "--Voila.ip=127.0.0.1",
-        ],
-        cwd=workspace_root,
-        env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-    )
+    log_handle = voila_log_path.open("w", encoding="utf-8")
+    try:
+        proc = subprocess.Popen(
+            [
+                sys.executable,
+                "-m",
+                "voila",
+                "voila.ipynb",
+                "--no-browser",
+                "--show_tracebacks=True",
+                f"--port={port}",
+                "--Voila.ip=127.0.0.1",
+            ],
+            cwd=workspace_root,
+            env=env,
+            stdout=log_handle,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
 
-    base_url = f"http://127.0.0.1:{port}"
-    deadline = time.time() + 120
-    ready = False
-    while time.time() < deadline:
-        if proc.poll() is not None:
-            out = proc.stdout.read() if proc.stdout else ""
-            pytest.fail(f"Voila exited early (code {proc.returncode}):\n{out}")
-        try:
-            with urllib.request.urlopen(base_url + "/", timeout=2) as resp:
-                if resp.status == 200:
-                    ready = True
-                    break
-        except (urllib.error.URLError, TimeoutError, OSError):
-            pass
-        time.sleep(1)
+        base_url = f"http://127.0.0.1:{port}"
+        deadline = time.time() + 120
+        ready = False
+        while time.time() < deadline:
+            if proc.poll() is not None:
+                log_handle.flush()
+                out = _tail_text_file(voila_log_path)
+                pytest.fail(f"Voila exited early (code {proc.returncode}):\n{out}")
+            try:
+                with urllib.request.urlopen(base_url + "/", timeout=2) as resp:
+                    if resp.status == 200:
+                        ready = True
+                        break
+            except (urllib.error.URLError, TimeoutError, OSError):
+                pass
+            time.sleep(1)
 
-    if not ready:
+        if not ready:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+            log_handle.flush()
+            log_tail = _tail_text_file(voila_log_path)
+            pytest.fail(f"Timed out waiting for Voila server to start.\n{log_tail}")
+
+        yield base_url, workspace_root, voila_log_path
+
         proc.terminate()
         try:
-            proc.wait(timeout=5)
+            proc.wait(timeout=10)
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait()
-        pytest.fail("Timed out waiting for Voila server to start")
-
-    yield base_url, workspace_root
-
-    proc.terminate()
-    try:
-        proc.wait(timeout=10)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait()
+    finally:
+        log_handle.close()
