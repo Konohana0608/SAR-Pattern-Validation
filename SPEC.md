@@ -49,7 +49,7 @@ Stream A — UI adjustments branch (`jgo/ui-adjustments` from `main-melanie`):
 | T1 | x | Create `jgo/ui-adjustments` from `main-melanie` HEAD | |
 | T2 | x | Cherry-pick plotting renames + overlays from `develop`: `12cdd09` (Simulated→Reference title), `9746b05` (cropped-area dark-gray overlay + legend), `d24c9d8` (noise-floor medium-gray overlay all 6 panels) | C1,C2,V5 |
 | T3 | x | Cherry-pick notebook layout from `develop`: `d774c11` (table below, center plots), `aed839e` (inline banner, swap tables, drop pass/fail button), `264c2d6` (stretch antenna grid to right-column height) | C1,V5 |
-| T4 | ~ | Port boxed log widget + radio-button height limit from `86d7889` (`6.3-noise-floor`); verify py3.9 compat; test scrollable output widget in voila | C1,V5 |
+| T4 | x | Port boxed log widget + radio-button height limit from `86d7889` (`6.3-noise-floor`); verify py3.9 compat; test scrollable output widget in voila | C1,V5 |
 | T5 | . | Run full test suite on `jgo/ui-adjustments`; fix any failures; open PR → `main-melanie` | V5 |
 
 Stream B — Measurement validation toolbox (`main-melanie` direct or sub-branch):
