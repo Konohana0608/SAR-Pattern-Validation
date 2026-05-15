@@ -496,6 +496,8 @@ def _build_parser() -> argparse.ArgumentParser:
         type=float,
         default=None,
         help="Measurement area y dimension (mm). Must be > 22 and <= 400.",
+    )
+    parser.add_argument(
         "--min_inscribed_square_mm",
         type=float,
         default=defaults.min_inscribed_square_mm,

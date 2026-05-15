@@ -133,6 +133,7 @@ class WorkflowConfigSchema(BaseModel):
         default=None,
         gt=MEASUREMENT_AREA_MIN_MM_EXCLUSIVE,
         le=MEASUREMENT_AREA_MAX_Y_MM,
+    )
     min_inscribed_square_mm: float = Field(
         default=DEFAULT_MIN_INSCRIBED_SQUARE_MM, gt=0
     )
