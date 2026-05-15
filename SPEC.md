@@ -14,7 +14,7 @@ V1: ∀ registration call → `fixed_mask` active pixel count ≥ 1, else raise 
 
 V2: ∀ `WorkflowExecutionError` raised inside `_complete_workflow` → `.issue` is preserved through exception handlers (no re-wrapping by generic `except Exception` clause). Applied via `except WorkflowExecutionError: raise` as first handler.
 
-V3: ∀ `measured_mask_u8` from `make_metric_masks()` → checked against `min_inscribed_square_mm` using `_mask_fits_axis_aligned_square_mm`; MASK_TOO_SMALL warning appended to `issues` if too small. Fires before registration, independently of the post-registration check on `evaluator.evaluation_mask`.
+V3: ∀ MASK_TOO_SMALL condition (pre-registration on `measured_mask_u8` or post-registration on `evaluator.evaluation_mask`) → raises `WorkflowExecutionError` with `severity="error"` and `code="MASK_TOO_SMALL"`; workflow stops at the first failing check. Pre-registration check fires before `Rigid2DRegistration.run()`.
 
 ## §B Bug Log
 
@@ -23,3 +23,4 @@ V3: ∀ `measured_mask_u8` from `make_metric_masks()` → checked against `min_i
 | B1 | 2026-05-15 | `noise_floor ≥ measured peak` → empty fixed mask → `VirtualSampledPointSet must have 1 or more points` crash in SimpleITK, surfaced as raw ITK traceback in Voila banner | V1 |
 | B2 | 2026-05-15 | `_complete_workflow` generic `except Exception` handler re-wrapped `WorkflowExecutionError` raised from inside the `try` block, discarding `.issue` | V2 |
 | B3 | 2026-05-15 | MASK_TOO_SMALL checked only post-registration; pre-registration noise-filtered `measured_mask_u8` never verified against `min_inscribed_square_mm` | V3 |
+| B4 | 2026-05-15 | MASK_TOO_SMALL emitted as `severity="warning"` appended to `issues`, allowing workflow to complete; physically it is a hard validity gate — comparison on a sub-22mm mask is invalid | V3 |

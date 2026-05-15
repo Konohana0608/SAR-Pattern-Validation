@@ -410,33 +410,13 @@ def test_complete_workflow_roi_policies_change_evaluated_region_consistently(
 
 
 @pytest.mark.slow
-def test_complete_workflow_emits_mask_too_small_issue(tmp_path: Path) -> None:
-    """MASK_TOO_SMALL emitted at both checkpoints when min_inscribed_square_mm is impossible."""
-    measured_csv, reference_csv = _write_synthetic_workflow_pair(tmp_path)
+def test_complete_workflow_raises_mask_too_small_pre_registration(
+    tmp_path: Path,
+) -> None:
+    """V3: pre-registration MASK_TOO_SMALL raises WorkflowExecutionError (hard error)."""
+    from sar_pattern_validation.errors import WorkflowExecutionError
 
-    result = complete_workflow(
-        measured_file_path=str(measured_csv),
-        reference_file_path=str(reference_csv),
-        render_plots=False,
-        show_plot=False,
-        min_inscribed_square_mm=1000.0,  # 1 m — impossible to satisfy at any checkpoint
-    )
-
-    assert not result.mask_fits_min_inscribed_square
-    # Both the pre-registration (V3) and post-registration checks fire.
-    assert len(result.issues) == 2
-    assert all(i.code == "MASK_TOO_SMALL" for i in result.issues)
-    assert all(i.severity == "warning" for i in result.issues)
-    assert all("1000" in i.message for i in result.issues)
-
-
-@pytest.mark.slow
-def test_complete_workflow_v3_pre_registration_mask_too_small(tmp_path: Path) -> None:
-    """V3: MASK_TOO_SMALL pre-registration fires when noise-filtered measured mask < 22 mm."""
-    # Large grid (±50 mm, step=2 mm) with a narrow Gaussian (σ=4 mm) as the measured signal.
-    # At the default noise floor (0.05 W/kg) the active area is ~20 mm diameter — below 22 mm.
-    # The support mask spans the full 100 mm grid, so the post-registration evaluation mask
-    # is large and does NOT trigger a second MASK_TOO_SMALL.
+    # Narrow Gaussian (σ=4 mm) on a large grid: noise-filtered active area ~20 mm < 22 mm.
     x, y = make_rect_grid(xmin=-0.05, xmax=0.05, ymin=-0.05, ymax=0.05, step=0.002)
     _, _, Z_meas = gaussian_2d(x, y, x0=0.0, y0=0.0, sx=0.004, sy=0.004, peak=1.0)
     measured_csv = tmp_path / "narrow_measured.csv"
@@ -446,22 +426,46 @@ def test_complete_workflow_v3_pre_registration_mask_too_small(tmp_path: Path) ->
     reference_csv = tmp_path / "wide_reference.csv"
     write_sar_csv(reference_csv, x, y, Z_ref)
 
-    result = complete_workflow(
-        measured_file_path=str(measured_csv),
-        reference_file_path=str(reference_csv),
-        render_plots=False,
-        show_plot=False,
-        min_inscribed_square_mm=22.0,
-    )
+    with pytest.raises(WorkflowExecutionError) as exc_info:
+        complete_workflow(
+            measured_file_path=str(measured_csv),
+            reference_file_path=str(reference_csv),
+            render_plots=False,
+            show_plot=False,
+            min_inscribed_square_mm=22.0,
+        )
 
-    pre_reg_issues = [
-        i
-        for i in result.issues
-        if i.code == "MASK_TOO_SMALL" and "pre-registration" in i.message
-    ]
-    assert len(pre_reg_issues) == 1
-    assert pre_reg_issues[0].severity == "warning"
-    assert "22" in pre_reg_issues[0].message
+    issue = exc_info.value.issue
+    assert issue is not None
+    assert issue.code == "MASK_TOO_SMALL"
+    assert issue.severity == "error"
+    assert "pre-registration" in issue.message
+    assert "22" in issue.message
+
+
+@pytest.mark.slow
+def test_complete_workflow_raises_mask_too_small_post_registration(
+    tmp_path: Path,
+) -> None:
+    """V3: 1000 mm threshold hits pre-registration check first — WorkflowExecutionError raised."""
+    from sar_pattern_validation.errors import WorkflowExecutionError
+
+    measured_csv, reference_csv = _write_synthetic_workflow_pair(tmp_path)
+
+    with pytest.raises(WorkflowExecutionError) as exc_info:
+        complete_workflow(
+            measured_file_path=str(measured_csv),
+            reference_file_path=str(reference_csv),
+            render_plots=False,
+            show_plot=False,
+            min_inscribed_square_mm=1000.0,
+        )
+
+    issue = exc_info.value.issue
+    assert issue is not None
+    assert issue.code == "MASK_TOO_SMALL"
+    assert issue.severity == "error"
+    assert "1000" in issue.message
 
 
 def test_complete_workflow_v1_empty_measured_mask_raises_issue(tmp_path: Path) -> None:

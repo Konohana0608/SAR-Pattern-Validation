@@ -249,8 +249,8 @@ def _complete_workflow(config: WorkflowConfig) -> WorkflowResult:
             )
             raise WorkflowExecutionError(_issue.message, issue=_issue)
 
-        # V3: check pre-registration noise-filtered mask against min inscribed square.
-        issues: list[ValidationIssue] = []
+        # V3: pre-registration check — noise-filtered measured mask must admit a
+        # min_inscribed_square_mm × min_inscribed_square_mm axis-aligned square.
         meas_arr = sitk.GetArrayFromImage(measured_mask_u8).astype(bool)
         if not _mask_fits_axis_aligned_square_mm(
             mask=meas_arr,
@@ -258,17 +258,16 @@ def _complete_workflow(config: WorkflowConfig) -> WorkflowResult:
             spacing_m=measured_mask_u8.GetSpacing(),
         ):
             _issue = ValidationIssue(
-                severity="warning",
+                severity="error",
                 code="MASK_TOO_SMALL",
                 message=(
                     f"Noise-filtered measured mask (pre-registration) does not contain a "
                     f"{config.min_inscribed_square_mm:.0f} mm × "
                     f"{config.min_inscribed_square_mm:.0f} mm axis-aligned inscribed "
-                    f"square. The gamma comparison may be invalid."
+                    f"square. The gamma comparison is invalid."
                 ),
             )
-            issues.append(_issue)
-            LOGGER.warning(_issue.message)
+            raise WorkflowExecutionError(_issue.message, issue=_issue)
 
         reg = Rigid2DRegistration(
             fixed_image=measured_db,
@@ -364,17 +363,16 @@ def _complete_workflow(config: WorkflowConfig) -> WorkflowResult:
         )
         if not mask_fits_min_inscribed_square:
             _issue = ValidationIssue(
-                severity="warning",
+                severity="error",
                 code="MASK_TOO_SMALL",
                 message=(
                     f"Gamma evaluation mask does not contain a "
                     f"{config.min_inscribed_square_mm:.0f} mm × "
                     f"{config.min_inscribed_square_mm:.0f} mm axis-aligned inscribed "
-                    f"square. The gamma comparison may be invalid."
+                    f"square. The gamma comparison is invalid."
                 ),
             )
-            issues.append(_issue)
-            LOGGER.warning(_issue.message)
+            raise WorkflowExecutionError(_issue.message, issue=_issue)
 
         LOGGER.info(
             "Gamma completed: pass_rate=%.2f%%, evaluated=%d, passed=%d, failed=%d, "
@@ -404,7 +402,6 @@ def _complete_workflow(config: WorkflowConfig) -> WorkflowResult:
             distance_to_agreement=config.distance_to_agreement,
             min_inscribed_square_mm=config.min_inscribed_square_mm,
             mask_fits_min_inscribed_square=mask_fits_min_inscribed_square,
-            issues=issues,
             gamma_map=gamma_map,
             evaluation_mask=evaluation_mask,
         )
