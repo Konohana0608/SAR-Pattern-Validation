@@ -15,8 +15,24 @@ IMAGE="${JUPYTER_MATH_IMAGE:-itisfoundation/jupyter-math:3.0.5}"
 WORKSPACE_IN_CONTAINER="/home/jovyan/work/workspace"
 REPO_IN_CONTAINER="$WORKSPACE_IN_CONTAINER/sar-pattern-validation"
 # Forward this port when the user runs `shell` so they can hit Voila from
-# their host browser. Override with VOILA_HOST_PORT=... if 8866 is taken.
-VOILA_HOST_PORT="${VOILA_HOST_PORT:-8866}"
+# their host browser. Override with VOILA_HOST_PORT=... to pin a port;
+# otherwise an available port is found automatically starting from 8866.
+_find_free_port() {
+    local port="${1:-8866}"
+    while (echo >/dev/tcp/127.0.0.1/"$port") >/dev/null 2>&1; do
+        port=$((port + 1))
+    done
+    echo "$port"
+}
+if [ -n "${VOILA_HOST_PORT:-}" ]; then
+    # User pinned a port — use it as-is (they own the conflict).
+    :
+else
+    VOILA_HOST_PORT="$(_find_free_port 8866)"
+    if [ "$VOILA_HOST_PORT" != "8866" ]; then
+        echo "Port 8866 in use — using port $VOILA_HOST_PORT instead."
+    fi
+fi
 
 # Persistent caches so reruns aren't paying the 200MB+ chromium download,
 # the uvx resolve cost, or repeated pip downloads every time.
