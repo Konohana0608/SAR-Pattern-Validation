@@ -16,7 +16,10 @@ from sar_pattern_validation.errors import (
     ValidationIssue,
     WorkflowExecutionError,
 )
-from sar_pattern_validation.gamma_eval import GammaMapEvaluator
+from sar_pattern_validation.gamma_eval import (
+    GammaMapEvaluator,
+    _mask_fits_axis_aligned_square_mm,
+)
 from sar_pattern_validation.image_loader import SARImageLoader
 from sar_pattern_validation.plotting import show_registration_overlay
 from sar_pattern_validation.registration2d import Rigid2DRegistration, Transform2D
@@ -246,6 +249,27 @@ def _complete_workflow(config: WorkflowConfig) -> WorkflowResult:
             )
             raise WorkflowExecutionError(_issue.message, issue=_issue)
 
+        # V3: check pre-registration noise-filtered mask against min inscribed square.
+        issues: list[ValidationIssue] = []
+        meas_arr = sitk.GetArrayFromImage(measured_mask_u8).astype(bool)
+        if not _mask_fits_axis_aligned_square_mm(
+            mask=meas_arr,
+            side_mm=config.min_inscribed_square_mm,
+            spacing_m=measured_mask_u8.GetSpacing(),
+        ):
+            _issue = ValidationIssue(
+                severity="warning",
+                code="MASK_TOO_SMALL",
+                message=(
+                    f"Noise-filtered measured mask (pre-registration) does not contain a "
+                    f"{config.min_inscribed_square_mm:.0f} mm × "
+                    f"{config.min_inscribed_square_mm:.0f} mm axis-aligned inscribed "
+                    f"square. The gamma comparison may be invalid."
+                ),
+            )
+            issues.append(_issue)
+            LOGGER.warning(_issue.message)
+
         reg = Rigid2DRegistration(
             fixed_image=measured_db,
             moving_image=reference_db,
@@ -333,7 +357,6 @@ def _complete_workflow(config: WorkflowConfig) -> WorkflowResult:
         # Per MGD 2026-04-24 feedback (slide 7): the gamma comparison is only
         # valid when an axis-aligned square of `min_inscribed_square_mm` fits
         # entirely inside the (post-registration, post-noise-filter) mask.
-        issues: list[ValidationIssue] = []
         mask_fits_min_inscribed_square = (
             evaluator.evaluation_mask_fits_axis_aligned_square_mm(
                 config.min_inscribed_square_mm
