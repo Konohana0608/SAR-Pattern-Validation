@@ -263,6 +263,7 @@ def _wait_for_workflow_cycle(voila_page, timeout_ms: int = 120_000) -> None:
         "    || bodyHtml.includes('Reference, 30 dBm')"
         "    || bodyText.includes('already match the current results')"
         "    || bodyText.includes('SAR pattern validation complete.')"
+        "    || bodyText.includes('Warning:')"
         "    || bodyText.includes('Could not reach the Voila server')"
         "    || bodyText.includes('Workflow execution failed')"
         "    || /\\bError:\\s/.test(bodyText);"
@@ -771,4 +772,38 @@ def test_noise_floor_persisted_after_change_and_reload(voila_page) -> None:
     assert actual == pytest.approx(target, abs=1e-9)
 
     _set_noise_floor(voila_page, _NOISE_FLOOR_DEFAULT)
-    _log("<< test_noise_floor_persisted_after_change_and_reload: pass")
+
+
+def test_mask_too_small_shows_warning_banner(voila_page, tmp_path) -> None:
+    """Uploading a < 22 mm × 22 mm measured file must show a MASK_TOO_SMALL warning banner."""
+    import numpy as np
+    import pandas as pd
+
+    _log(">> test_mask_too_small_shows_warning_banner")
+
+    # Generate a 15 mm × 15 mm Gaussian SAR grid — smaller than the 22 mm inscribed-square threshold.
+    step = 0.001
+    xs = np.arange(-0.0075, 0.0076, step)
+    ys = np.arange(-0.0075, 0.0076, step)
+    X, Y = np.meshgrid(xs, ys)
+    Z = 2.5 * np.exp(-((X**2 + Y**2) / (2 * 0.003**2)))
+    tiny_csv = tmp_path / "tiny_measured_sSAR_15mm.csv"
+    pd.DataFrame({"x [m]": X.ravel(), "y [m]": Y.ravel(), "SAR": Z.ravel()}).to_csv(
+        tiny_csv, index=False
+    )
+
+    _ensure_run_button_enabled(voila_page)
+    _log("   uploading tiny 15 mm × 15 mm measured CSV")
+    _upload_file(voila_page, tiny_csv)
+
+    run_btn = voila_page.locator("button:has-text('Compare Patterns')")
+    _log("   clicking Compare Patterns")
+    run_btn.click()
+    _wait_for_workflow_cycle(voila_page, timeout_ms=120_000)
+
+    body_text = voila_page.locator("body").inner_text()
+    _log(f"   body snippet: {body_text[:300]!r}")
+    assert "Warning:" in body_text, "Expected a Warning banner for MASK_TOO_SMALL"
+    assert "22 mm" in body_text, "Expected '22 mm' in MASK_TOO_SMALL warning text"
+
+    _log("<< test_mask_too_small_shows_warning_banner: pass")
