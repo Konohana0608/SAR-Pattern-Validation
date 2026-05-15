@@ -1,6 +1,6 @@
 # Makefile to recreate pyproject.toml using uv commands
 
-.PHONY: create-pyproject clean help tests tests-fast tests-slow tests-cov measurement-validation lint format typecheck setup-pre-commit test-voila-e2e serve-voila kill-voila
+.PHONY: create-pyproject clean help tests tests-fast tests-slow tests-cov measurement-validation lint format typecheck setup-pre-commit test-voila-e2e serve-voila kill-voila ci
 
 JUPYTER_MATH_IMAGE ?= itisfoundation/jupyter-math:3.0.5
 
@@ -18,6 +18,7 @@ help:
 	@echo "  setup-pre-commit     - Install and set up pre-commit hooks"
 	@echo "  run-pre-commit       - Run pre-commit hooks on staged files"
 	@echo "  run-pre-commit-all   - Run pre-commit hooks on all files"
+	@echo "  ci                   - Run exactly what CI runs (lint + type-check + fast tests + slow tests + E2E)"
 	@echo "  help                 - Show this help message"
 	@echo ""
 	@echo "Examples:"
@@ -110,3 +111,24 @@ kill-voila:
 	@docker ps --filter "name=sar-voila-jm-" -q | xargs -r docker kill 2>/dev/null || true
 	@docker ps --filter "ancestor=$(JUPYTER_MATH_IMAGE)" -q | xargs -r docker kill 2>/dev/null || true
 	@echo "kill-voila: done"
+
+# Run exactly what CI runs, locally.
+# Mirrors the four CI jobs: type-check, tests, slow-tests, e2e-tests.
+# Note: slow-tests and e2e-tests require git-lfs data (run `git lfs pull` first).
+ci:
+	@echo "=== [1/4] lint + type-check ==="
+	uv run ruff check src/ tests/
+	uv run ty check src/
+	@echo "=== [2/4] fast tests ==="
+	uv run pytest -v -m "not slow and not validation" \
+		--cov=src/sar_pattern_validation --cov-report=xml:coverage.xml --cov-report=term \
+		tests/
+	@echo "=== [3/4] slow + integration tests ==="
+	uv run pytest -v -m "slow or validation" \
+		--basetemp=test-artifacts \
+		--ignore=tests/test_measurement_validation.py \
+		--cov=src/sar_pattern_validation --cov-report=xml:coverage-validation.xml --cov-report=term \
+		tests/
+	@echo "=== [4/4] e2e tests (voila + playwright) ==="
+	JUPYTER_MATH_IMAGE=$(JUPYTER_MATH_IMAGE) ./scripts/voila_docker.sh test
+	@echo "=== CI complete ==="

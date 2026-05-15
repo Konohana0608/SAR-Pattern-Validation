@@ -19,7 +19,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install system dependencies
         shell: bash
@@ -42,7 +42,7 @@ jobs:
         run: uv run pytest -v -m "not slow and not validation" --cov=src/sar_pattern_validation --cov-report=xml:coverage.xml --cov-report=term tests/
 
       - name: Upload coverage artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-tests
           path: coverage.xml
@@ -59,7 +59,7 @@ jobs:
       MPLBACKEND: Agg
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install git-lfs and pull example data
         shell: bash
@@ -86,7 +86,7 @@ jobs:
             tests/
 
       - name: Upload slow coverage artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-slow-tests
           path: coverage-validation.xml
@@ -94,7 +94,7 @@ jobs:
           retention-days: 30
 
       - name: Upload slow test artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: slow-test-artifacts
           path: test-artifacts/
@@ -108,7 +108,7 @@ jobs:
       image: ghcr.io/astral-sh/uv:python3.10-bookworm
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Sync dependencies
         shell: bash
@@ -133,7 +133,7 @@ jobs:
       PLAYWRIGHT_BROWSERS_PATH: /root/.cache/ms-playwright
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install Playwright + tooling system deps
         shell: bash
@@ -187,7 +187,7 @@ jobs:
 
       - name: Upload E2E artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-results
           path: /tmp/playwright-results/

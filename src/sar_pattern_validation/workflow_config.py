@@ -9,6 +9,7 @@ DEFAULT_MEASURED_FILE_PATH: Final[str] = "measured.csv"
 DEFAULT_REFERENCE_FILE_PATH: Final[str] = "reference.csv"
 DEFAULT_POWER_LEVEL_DBM: Final[float] = 30.0
 DEFAULT_NOISE_FLOOR: Final[float] = 0.05
+NOISE_FLOOR_MAX: Final[float] = 0.1
 DEFAULT_SHOW_PLOT: Final[bool] = False
 DEFAULT_RENDER_PLOTS: Final[bool] = True
 DEFAULT_DOSE_TO_AGREEMENT: Final[float] = 5.0
@@ -22,6 +23,11 @@ DEFAULT_ADAPTIVE_ASSUME_AXIAL_SYMMETRY: Final[bool] = True
 DEFAULT_ADAPTIVE_MAX_STAGES: Final[int] = 5
 DEFAULT_ADAPTIVE_MAX_STAGE_EVALS: Final[int] = 50000
 DEFAULT_LOG_LEVEL: Final[str] = "INFO"
+
+# Minimum axis-aligned physical square (mm) that must fit within the gamma
+# evaluation mask for the comparison to be considered valid. 22 mm = the
+# face of the 10 g averaging cube. Per MGD 2026-04-24 feedback, slide 7.
+DEFAULT_MIN_INSCRIBED_SQUARE_MM: Final[float] = 22.0
 DEFAULT_PLOT_WINDOW_MM: Final[tuple[float, float, float, float]] = (
     -120.0,
     120.0,
@@ -114,3 +120,4 @@ class WorkflowConfig:
     log_level: str = DEFAULT_LOG_LEVEL
     plotting: PlottingConfig = field(default_factory=PlottingConfig)
     output_dir: str | None = None
+    min_inscribed_square_mm: float = DEFAULT_MIN_INSCRIBED_SQUARE_MM
