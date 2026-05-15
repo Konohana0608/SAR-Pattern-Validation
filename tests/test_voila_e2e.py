@@ -657,8 +657,8 @@ def test_noise_floor_persisted_after_change_and_reload(voila_page) -> None:
     _set_noise_floor(voila_page, _NOISE_FLOOR_DEFAULT)
 
 
-def test_mask_too_small_shows_warning_banner(voila_page, tmp_path) -> None:
-    """Uploading a < 22 mm × 22 mm measured file must show a MASK_TOO_SMALL warning banner."""
+def test_mask_too_small_shows_error_banner(voila_page, tmp_path) -> None:
+    """Uploading a < 22 mm × 22 mm measured file must show a MASK_TOO_SMALL error banner."""
     import numpy as np
     import pandas as pd
 
@@ -686,7 +686,7 @@ def test_mask_too_small_shows_warning_banner(voila_page, tmp_path) -> None:
 
     body_text = voila_page.locator("body").inner_text()
     _log(f"   body snippet: {body_text[:300]!r}")
-    assert "Warning:" in body_text, "Expected a Warning banner for MASK_TOO_SMALL"
-    assert "22 mm" in body_text, "Expected '22 mm' in MASK_TOO_SMALL warning text"
+    assert "Error:" in body_text, "Expected an Error banner for MASK_TOO_SMALL"
+    assert "22 mm" in body_text, "Expected '22 mm' in MASK_TOO_SMALL error text"
 
-    _log("<< test_mask_too_small_shows_warning_banner: pass")
+    _log("<< test_mask_too_small_shows_error_banner: pass")
