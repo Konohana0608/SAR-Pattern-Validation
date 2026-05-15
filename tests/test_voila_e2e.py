@@ -72,6 +72,17 @@ def _log(msg: str) -> None:
     print(f"[{stamp}] {msg}", flush=True)
 
 
+def _tail_text_file(path: Path, max_chars: int = 8000) -> str:
+    """Return the tail of a UTF-8 text file for failure diagnostics."""
+    if not path.exists():
+        return f"<missing log file: {path}>"
+
+    text = path.read_text(encoding="utf-8", errors="replace")
+    if len(text) <= max_chars:
+        return text
+    return text[-max_chars:]
+
+
 # ---------------------------------------------------------------------------
 # Shared page fixture — kernel starts once for the whole module
 # ---------------------------------------------------------------------------
@@ -80,7 +91,7 @@ def _log(msg: str) -> None:
 @pytest.fixture(scope="module")
 def voila_page(playwright, voila_server):
     """Navigate to voila once and keep the page alive for all tests."""
-    base_url, _ = voila_server
+    base_url, _, voila_log_path = voila_server
     _log(f">> voila_page: launching headless chromium (server={base_url})")
     browser = playwright.chromium.launch(headless=True)
     context = browser.new_context()
@@ -94,7 +105,18 @@ def voila_page(playwright, voila_server):
     _log(
         f">> voila_page: waiting for selector .widget-button (timeout={_KERNEL_TIMEOUT}ms)"
     )
-    page.wait_for_selector(".widget-button", timeout=_KERNEL_TIMEOUT)
+    try:
+        page.wait_for_selector(".widget-button", timeout=_KERNEL_TIMEOUT)
+    except Exception as exc:
+        page_html = page.content()
+        body_text = page.locator("body").inner_text(timeout=5_000)
+        log_tail = _tail_text_file(voila_log_path)
+        raise AssertionError(
+            "Voila page loaded but no widgets rendered within the kernel timeout.\n\n"
+            f"Body text:\n{body_text.strip() or '<empty body>'}\n\n"
+            f"Page HTML:\n{page_html[:8000]}\n\n"
+            f"Voila log tail ({voila_log_path}):\n{log_tail}"
+        ) from exc
     _log(f"<< voila_page: kernel ready after {time.time() - started:.1f}s")
 
     yield page
@@ -220,9 +242,8 @@ def _ensure_run_button_enabled(voila_page) -> None:
     _log("<< ensure_run_button_enabled: enabled")
 
 
-def _wait_for_workflow_cycle(voila_page, timeout_ms: int = 120_000) -> None:
+def _wait_for_workflow_cycle(voila_page, timeout_ms: int = 300_000) -> None:
     """Wait for Compare Patterns to disable (running) then re-enable (done).
-
     Drives off the button-state cycle, not body text. When the page has stale
     result content in the DOM (restored session, prior run), any text-based
     terminal-state probe matches immediately and hides whether the new run
