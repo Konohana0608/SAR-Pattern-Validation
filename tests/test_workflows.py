@@ -475,3 +475,46 @@ def test_complete_workflow_emits_csv_format_error_issue(tmp_path: Path) -> None:
     assert exc_info.value.issue is not None
     assert exc_info.value.issue.code == "CSV_FORMAT_ERROR"
     assert exc_info.value.issue.severity == "error"
+
+
+def test_complete_workflow_v3_noise_filtered_pixels_excluded_from_gamma_mask(
+    tmp_path: Path,
+) -> None:
+    """V3: metric mask (SAR >= cutoff) must gate gamma eval, not support mask.
+
+    With noise_floor=0.001 cutoff=0.002 W/kg (near-zero); raising to 0.05 W/kg
+    sets cutoff=0.1 W/kg and excludes sub-peak tails. Evaluated pixel count must
+    be strictly smaller — proving the metric mask (not the boundary-only support
+    mask) reaches the evaluator via workflows.py:_apply_roi_policy.
+    """
+    measured_csv, reference_csv = _write_synthetic_workflow_pair(tmp_path)
+
+    fast_stages = [
+        {
+            "translation_step": 0.001,
+            "rot_step_deg": 0.0,
+            "rot_span_deg": 0.0,
+            "tx_steps": 1,
+            "ty_steps": 1,
+        }
+    ]
+    common = dict(
+        measured_file_path=str(measured_csv),
+        reference_file_path=str(reference_csv),
+        transform_type="translate",
+        resample_resolution=0.005,
+        render_plots=False,
+        show_plot=False,
+        distance_to_agreement=2.0,
+        dose_to_agreement=5.0,
+        stages=fast_stages,
+        evaluation_roi_policy="intersection",
+    )
+
+    no_noise_result = complete_workflow(**common, noise_floor=0.001)
+    noise_result = complete_workflow(**common, noise_floor=0.05)
+
+    assert noise_result.evaluated_pixel_count < no_noise_result.evaluated_pixel_count, (
+        "V3 violated: raising noise_floor did not reduce evaluated_pixel_count; "
+        "metric mask may not be reaching the evaluator"
+    )

@@ -308,7 +308,7 @@ def _complete_workflow(config: WorkflowConfig) -> WorkflowResult:
         _apply_roi_policy(
             evaluator,
             reference_mask_u8=reference_mask_u8,
-            measured_mask_u8=measured_support_u8,
+            measured_mask_u8=measured_mask_u8,
             policy=config.evaluation_roi_policy,
         )
 
