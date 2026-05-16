@@ -41,6 +41,9 @@ DEFAULT_PLOT_FIGURE_FACECOLOR: Final[str] = "white"
 DEFAULT_PLOT_DARK_AXES_FACECOLOR: Final[str] = "black"
 DEFAULT_PLOT_LIGHT_AXES_FACECOLOR: Final[str] = "white"
 DEFAULT_PLOT_SAVE_DPI: Final[int] = 200
+DEFAULT_PLOT_NOT_EVALUATED_COLOR: Final[str] = "lightgray"
+DEFAULT_PLOT_CROPPED_DATA_COLOR: Final[str] = "#555555"
+DEFAULT_PLOT_NOISE_FLOOR_COLOR: Final[str] = "#9aa0a6"
 
 ROI_POLICY_CHOICES: Final[tuple[str, ...]] = ("reference_only", "intersection", "none")
 EvaluationRoiPolicy = Literal["reference_only", "intersection", "none"]
@@ -82,6 +85,13 @@ class PlottingConfig:
     dark_axes_facecolor: str = DEFAULT_PLOT_DARK_AXES_FACECOLOR
     light_axes_facecolor: str = DEFAULT_PLOT_LIGHT_AXES_FACECOLOR
     save_dpi: int = DEFAULT_PLOT_SAVE_DPI
+    not_evaluated_color: str = DEFAULT_PLOT_NOT_EVALUATED_COLOR
+    cropped_data_color: str = DEFAULT_PLOT_CROPPED_DATA_COLOR
+    noise_floor_color: str = DEFAULT_PLOT_NOISE_FLOOR_COLOR
+    measurement_area_x_mm: float | None = None
+    measurement_area_y_mm: float | None = None
+    center_x_mm: float = 0.0
+    center_y_mm: float = 0.0
 
 
 @dataclass

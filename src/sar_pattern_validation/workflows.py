@@ -11,8 +11,15 @@ from typing import Any
 import numpy as np
 import SimpleITK as sitk
 
-from sar_pattern_validation.errors import WorkflowExecutionError
-from sar_pattern_validation.gamma_eval import GammaMapEvaluator
+from sar_pattern_validation.errors import (
+    CsvFormatError,
+    ValidationIssue,
+    WorkflowExecutionError,
+)
+from sar_pattern_validation.gamma_eval import (
+    GammaMapEvaluator,
+    _mask_fits_axis_aligned_square_mm,
+)
 from sar_pattern_validation.image_loader import SARImageLoader
 from sar_pattern_validation.plotting import show_registration_overlay
 from sar_pattern_validation.registration2d import Rigid2DRegistration, Transform2D
@@ -81,6 +88,7 @@ class WorkflowResult:
     distance_to_agreement: float
     min_inscribed_square_mm: float
     mask_fits_min_inscribed_square: bool
+    issues: list[ValidationIssue] = field(default_factory=list)
     gamma_map: np.ndarray | None = field(default=None, compare=False)
     evaluation_mask: np.ndarray | None = field(default=None, compare=False)
 
@@ -211,6 +219,39 @@ def _complete_workflow(config: WorkflowConfig) -> WorkflowResult:
 
         reference_db, measured_db = loader.get_images()
 
+        # Auto-center plot window on the measured data centroid only when the
+        # caller left window_mm at its default value (no explicit override).
+        _cx_mm = float(loader._measured_axes_m[0].mean()) * 1000.0
+        _cy_mm = float(loader._measured_axes_m[1].mean()) * 1000.0
+        config.plotting.center_x_mm = _cx_mm
+        config.plotting.center_y_mm = _cy_mm
+        if config.plotting.window_mm == DEFAULT_PLOT_WINDOW_MM:
+            _x_span_mm = (
+                loader._measured_axes_m[0].max() - loader._measured_axes_m[0].min()
+            ) * 1000.0
+            _y_span_mm = (
+                loader._measured_axes_m[1].max() - loader._measured_axes_m[1].min()
+            ) * 1000.0
+            if (
+                config.plotting.measurement_area_x_mm is not None
+                and config.plotting.measurement_area_y_mm is not None
+            ):
+                _half = (
+                    max(
+                        config.plotting.measurement_area_x_mm,
+                        config.plotting.measurement_area_y_mm,
+                    )
+                    / 2.0
+                )
+            else:
+                _half = max(_x_span_mm, _y_span_mm) / 2.0 * 1.1
+            config.plotting.window_mm = (
+                _cx_mm - _half,
+                _cx_mm + _half,
+                _cy_mm - _half,
+                _cy_mm + _half,
+            )
+
         if config.render_plots and (
             config.show_plot
             or loaded_images_save_path is not None
@@ -227,6 +268,39 @@ def _complete_workflow(config: WorkflowConfig) -> WorkflowResult:
         LOGGER.info("Step 2/3: Registering reference SAR onto measured grid")
         measured_mask_u8, reference_mask_u8 = loader.make_metric_masks()
         measured_support_u8, _ = loader.make_support_masks()
+
+        if not np.any(sitk.GetArrayFromImage(measured_mask_u8)):
+            _issue = ValidationIssue(
+                severity="error",
+                code="EMPTY_MEASURED_MASK",
+                message=(
+                    f"No measured SAR values exceed the noise floor "
+                    f"({config.noise_floor:.3f} W/kg; measured peak: "
+                    f"{loader.measured_raw_peak:.4g} W/kg). "
+                    f"Lower the noise floor or check the measurement file."
+                ),
+            )
+            raise WorkflowExecutionError(_issue.message, issue=_issue)
+
+        # V3: pre-registration check — noise-filtered measured mask must admit a
+        # min_inscribed_square_mm × min_inscribed_square_mm axis-aligned square.
+        meas_arr = sitk.GetArrayFromImage(measured_mask_u8).astype(bool)
+        if not _mask_fits_axis_aligned_square_mm(
+            mask=meas_arr,
+            side_mm=config.min_inscribed_square_mm,
+            spacing_m=measured_mask_u8.GetSpacing(),
+        ):
+            _issue = ValidationIssue(
+                severity="error",
+                code="MASK_TOO_SMALL",
+                message=(
+                    f"Noise-filtered measured mask (pre-registration) does not contain a "
+                    f"{config.min_inscribed_square_mm:.0f} mm × "
+                    f"{config.min_inscribed_square_mm:.0f} mm axis-aligned inscribed "
+                    f"square. The gamma comparison is invalid."
+                ),
+            )
+            raise WorkflowExecutionError(_issue.message, issue=_issue)
 
         reg = Rigid2DRegistration(
             fixed_image=measured_db,
@@ -270,6 +344,7 @@ def _complete_workflow(config: WorkflowConfig) -> WorkflowResult:
                 aligned_db,
                 title="Rigid Registration Overlay",
                 image_save_path=registered_image_save_path,
+                noise_floor_mask=loader._measured_noise_floor_mask,
                 plotting_config=config.plotting,
             )
 
@@ -290,7 +365,7 @@ def _complete_workflow(config: WorkflowConfig) -> WorkflowResult:
         _apply_roi_policy(
             evaluator,
             reference_mask_u8=reference_mask_u8,
-            measured_mask_u8=measured_support_u8,
+            measured_mask_u8=measured_mask_u8,
             policy=config.evaluation_roi_policy,
         )
 
@@ -301,6 +376,7 @@ def _complete_workflow(config: WorkflowConfig) -> WorkflowResult:
             evaluator.show(
                 gamma_image_save_path=gamma_comparison_image_path,
                 failure_image_save_path=failure_image_path,
+                noise_floor_mask=loader._measured_noise_floor_mask,
                 plotting_config=config.plotting,
             )
 
@@ -314,21 +390,24 @@ def _complete_workflow(config: WorkflowConfig) -> WorkflowResult:
 
         # Per MGD 2026-04-24 feedback (slide 7): the gamma comparison is only
         # valid when an axis-aligned square of `min_inscribed_square_mm` fits
-        # entirely inside the (post-registration, post-noise-filter) mask. This
-        # rejects pathological L-shaped or thin masks that would pass per-axis
-        # checks but cannot host a 10 g averaging cube face.
+        # entirely inside the (post-registration, post-noise-filter) mask.
         mask_fits_min_inscribed_square = (
             evaluator.evaluation_mask_fits_axis_aligned_square_mm(
                 config.min_inscribed_square_mm
             )
         )
         if not mask_fits_min_inscribed_square:
-            LOGGER.warning(
-                "Gamma evaluation mask does not contain an inscribed %.1f mm × %.1f mm "
-                "axis-aligned square; comparison should be considered invalid.",
-                config.min_inscribed_square_mm,
-                config.min_inscribed_square_mm,
+            _issue = ValidationIssue(
+                severity="error",
+                code="MASK_TOO_SMALL",
+                message=(
+                    f"Gamma evaluation mask does not contain a "
+                    f"{config.min_inscribed_square_mm:.0f} mm × "
+                    f"{config.min_inscribed_square_mm:.0f} mm axis-aligned inscribed "
+                    f"square. The gamma comparison is invalid."
+                ),
             )
+            raise WorkflowExecutionError(_issue.message, issue=_issue)
 
         LOGGER.info(
             "Gamma completed: pass_rate=%.2f%%, evaluated=%d, passed=%d, failed=%d, "
@@ -366,6 +445,15 @@ def _complete_workflow(config: WorkflowConfig) -> WorkflowResult:
             _write_output_dir(Path(config.output_dir), workflow_result, evaluator)
 
         return workflow_result
+    except WorkflowExecutionError:
+        raise
+    except CsvFormatError as exc:
+        _issue = ValidationIssue(
+            severity="error",
+            code="CSV_FORMAT_ERROR",
+            message=str(exc),
+        )
+        raise WorkflowExecutionError(f"Workflow failed: {exc}", issue=_issue) from exc
     except Exception as exc:
         raise WorkflowExecutionError(f"Workflow failed: {exc}") from exc
 
